@@ -1,5 +1,7 @@
 #include "library.h"
 
+#include <opencv2/core.hpp>
+
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
@@ -13,6 +15,14 @@ extern "C" {
 void hello()
 {
     std::cout << "Hello, World!" << std::endl;
+}
+
+bool framesSimilar(const cv::Mat& a, const cv::Mat& b, double tolerance)
+{
+    if (a.size() != b.size() || a.type() != b.type())
+        return false;
+    const double meanAbsDiff = cv::norm(a, b, cv::NORM_L1) / (a.total() * a.channels());
+    return meanAbsDiff <= tolerance;
 }
 
 namespace {
