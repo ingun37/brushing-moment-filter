@@ -42,19 +42,6 @@ dedupStage(stdexec::scheduler auto scheduler, FrameQueue& in, FrameQueue& out,
            });
 }
 
-// Buffers `batchSize` frames from `in`, forwards `sampleCount` of them at
-// regular intervals, discards the rest, and repeats
-// (see downsampleToQueue).
-inline stdexec::sender auto
-downsampleStage(stdexec::scheduler auto scheduler, FrameQueue& in, FrameQueue& out,
-                std::size_t batchSize, std::size_t sampleCount)
-{
-    return stdexec::schedule(scheduler)
-         | stdexec::then([&in, &out, batchSize, sampleCount] {
-               downsampleToQueue(in, out, batchSize, sampleCount);
-           });
-}
-
 // Generic stage for custom per-frame filters (e.g. a future hand-filtering UI
 // thread): pops each frame from `in` and pushes it to `out` if
 // `keep(frame)` returns true. Closes `out` when done; propagates an early

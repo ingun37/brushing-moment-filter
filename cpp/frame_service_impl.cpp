@@ -135,7 +135,6 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
 
     FrameQueue decoded(4);
     FrameQueue unique(4);
-    FrameQueue sampled(4);
 
     std::expected<void, std::string> extracted;
     std::jthread extractThread([&] {
@@ -145,15 +144,12 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
     std::jthread dedupThread([&] {
         removeConsecutiveDuplicatesToQueue(decoded, unique, opts_.tolerance);
     });
-    std::jthread downsampleThread([&] {
-        downsampleToQueue(unique, sampled, opts_.batchN, opts_.sampleM);
-    });
 
     grpc::Status status = grpc::Status::OK;
 
     // Send the first frame unprompted, then one frame per Next.
     while (true) {
-        auto frame = sampled.pop();
+        auto frame = unique.pop();
         if (!frame) { // pipeline drained: report end of file and terminate
             if (!extracted) {
                 status = {grpc::StatusCode::INVALID_ARGUMENT,
@@ -178,9 +174,8 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
     }
 
     // Unblock any still-running stage; close() propagates upstream.
-    sampled.close();
-    decoded.close();
     unique.close();
+    decoded.close();
     extractThread.join();
     if (!extracted)
         std::cerr << "decoding failed: " << extracted.error() << "\n";

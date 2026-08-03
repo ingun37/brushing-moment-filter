@@ -4,15 +4,18 @@ Use modern standard libraries (ranges, concepts, expected, etc.) whenever possib
 
 - `library.{h,cpp}` — core: `extractFrames`, `framesSimilar`, `removeConsecutiveDuplicates`,
   plus the threaded pipeline: `FrameQueue` (bounded, blocking, `close()` for shutdown) and the
-  queue stages `extractFramesToQueue`, `removeConsecutiveDuplicatesToQueue`, `downsampleToQueue`.
+  queue stages `extractFramesToQueue`, `removeConsecutiveDuplicatesToQueue`.
 - `pipeline.h` — stdexec (P2300 senders) wrappers around the queue stages, `pipeline::` namespace.
   stdexec provides launch/join/error plumbing only; the FrameQueues are the actual stream +
   backpressure (senders model one async value, not streams).
 - `frame_service.proto` — gRPC contract, shared with the Avalonia client in `dotnet/DataGenUI`
   (its build generates C# stubs from this same file). Change it in lockstep with both sides.
 - `frame_service_impl.{h,cpp}` — gRPC service (`frame_service` static lib); `server.cpp` is just
-  `main()` for the `frame_server` executable:
-  `frame_server <port> [intervalSeconds] [tolerance] [batchN] [sampleM] [timeoutSeconds]`.
+  `main()` for the `frame_server` executable. Arguments are mandatory long flags
+  (`--port` required; see `frame_server --help`):
+  `frame_server --port 15071 --sample-interval-seconds 1.0 --dedup-tolerance 5`.
+  The session idle timeout is not a flag; it defaults to 300 s in `FrameServerOptions`
+  (tests override it programmatically).
 - `tests/library_test.cpp` + `tests/server_test.cpp` (the latter runs the service on an
   in-process gRPC channel, no ports). Test videos come from `tests/gen-test-resources.sh`.
 
@@ -37,8 +40,7 @@ cmake --build build -j 8 && (cd build && ctest)
 
 - Dedup tolerance: adjacent digit images in `12.mp4` differ by as little as ~7.3 mean abs diff
   ("5" vs "6"), so `framesSimilar` tolerance 10 merges them; tests use 5 for that video.
-- `extractFrames` with a tiny interval (e.g. 0.001) decodes every frame — used to feed the
-  downsample stage.
+- `extractFrames` with a tiny interval (e.g. 0.001) decodes every frame.
 - The server buffers the full upload to a temp file before decoding (mp4 moov atom is usually at
   the end; sequential decode of arbitrary mp4s isn't possible). Known limitation, not a bug.
 - `cv::Mat` copies are refcounted shallow copies — keeping a reference then moving the Mat

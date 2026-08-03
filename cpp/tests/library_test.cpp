@@ -266,53 +266,6 @@ TEST(PipelineTest, CustomFilterStageComposesIntoPipeline) {
     EXPECT_LT(meanAbsDiff(frames[1], c), 10.0);
 }
 
-TEST(DownsampleToQueueTest, PicksRegularlySpacedFramesPerBatch) {
-    // 12 frames of brightness 0, 20, 40, ... with N=5, M=2: each full batch
-    // keeps indices 0*5/2=0 and 1*5/2=2, the partial tail [10, 11] keeps
-    // only index 0. Expected brightness: 0, 40, 100, 140, 200.
-    FrameQueue input(12);
-    FrameQueue output(12);
-    for (int i = 0; i < 12; ++i)
-        ASSERT_TRUE(input.push(cv::Mat(8, 8, CV_8UC3, cv::Scalar::all(i * 20))));
-    input.close();
-
-    downsampleToQueue(input, output, 5, 2);
-
-    const int expected[] = {0, 40, 100, 140, 200};
-    for (int value : expected) {
-        auto frame = output.pop();
-        ASSERT_TRUE(frame.has_value());
-        EXPECT_LT(meanAbsDiff(*frame, cv::Mat(8, 8, CV_8UC3, cv::Scalar::all(value))),
-                  1e-9);
-    }
-    EXPECT_EQ(output.pop(), std::nullopt);
-}
-
-TEST(DownsampleToQueueTest, PipelineSamplesOneFramePerNumberOfCountingVideo) {
-    // 12.mp4 is 30 fps, flashing 0..11 for one second each. Decoding every
-    // frame and downsampling 1-in-30 must yield exactly 12 frames, one per
-    // number, in order.
-    exec::static_thread_pool pool(3);
-    auto scheduler = pool.get_scheduler();
-    FrameQueue decoded(4);
-    FrameQueue sampled(4);
-
-    auto [extracted, frames] = stdexec::sync_wait(
-        stdexec::when_all(
-            // 0.001 s interval < frame duration, so every frame is sampled.
-            pipeline::extractStage(scheduler, kResourceDir + "/12.mp4", 0.001, decoded),
-            pipeline::downsampleStage(scheduler, decoded, sampled, 30, 1),
-            pipeline::collectStage(scheduler, sampled))).value();
-
-    ASSERT_TRUE(extracted.has_value()) << extracted.error();
-    ASSERT_EQ(frames.size(), 12u);
-    for (int i = 0; i < 12; ++i) {
-        const cv::Mat number = cv::imread(kResourceDir + "/" + std::to_string(i) + ".png");
-        ASSERT_FALSE(number.empty());
-        EXPECT_LT(meanAbsDiff(frames[i], number), 10.0) << "frame " << i;
-    }
-}
-
 TEST(ExtractFramesTest, SamplesAbcVideoEveryPointNineSeconds) {
     // 3 s video, one letter per second. Sampling at t = 0, 0.9, 1.8, 2.7
     // should yield A, A, B, C.
