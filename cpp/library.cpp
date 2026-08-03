@@ -9,6 +9,7 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#include <functional>
 #include <iostream>
 #include <memory>
 
@@ -59,10 +60,11 @@ struct SwsGuard {
     ~SwsGuard() { sws_freeContext(ctx); }
 };
 
-} // namespace
-
-std::expected<std::vector<cv::Mat>, std::string>
-extractFrames(const std::string& path, double intervalSeconds)
+// Decodes the video at `path` and passes each sampled BGR frame to `sink`.
+// Stops early if `sink` returns false.
+std::expected<void, std::string>
+decodeFrames(const std::string& path, double intervalSeconds,
+             const std::function<bool(cv::Mat)>& sink)
 {
     if (intervalSeconds <= 0)
         return fail("intervalSeconds must be positive");
@@ -97,7 +99,7 @@ extractFrames(const std::string& path, double intervalSeconds)
         return fail("allocation failed");
 
     SwsGuard sws;
-    std::vector<cv::Mat> result;
+    bool stopped = false;
     double nextSampleTime = 0.0;
     const double timeBase = av_q2d(stream->time_base);
 
@@ -110,23 +112,26 @@ extractFrames(const std::string& path, double intervalSeconds)
             auto mat = toBgrMat(f, sws.ctx);
             if (!mat)
                 return std::unexpected(mat.error());
-            result.push_back(std::move(*mat));
+            if (!sink(std::move(*mat))) {
+                stopped = true;
+                return {};
+            }
             nextSampleTime += intervalSeconds;
         }
         return {};
     };
 
     auto drainDecoder = [&]() -> std::expected<void, std::string> {
-        while ((err = avcodec_receive_frame(codecCtx.get(), frame.get())) >= 0) {
+        while (!stopped && (err = avcodec_receive_frame(codecCtx.get(), frame.get())) >= 0) {
             if (auto ok = handleFrame(frame.get()); !ok)
                 return ok;
         }
-        if (err != AVERROR(EAGAIN) && err != AVERROR_EOF)
+        if (!stopped && err != AVERROR(EAGAIN) && err != AVERROR_EOF)
             return fail("avcodec_receive_frame failed", err);
         return {};
     };
 
-    while ((err = av_read_frame(fmt.get(), packet.get())) >= 0) {
+    while (!stopped && (err = av_read_frame(fmt.get(), packet.get())) >= 0) {
         if (packet->stream_index == streamIndex) {
             if ((err = avcodec_send_packet(codecCtx.get(), packet.get())) < 0)
                 return fail("avcodec_send_packet failed", err);
@@ -135,12 +140,58 @@ extractFrames(const std::string& path, double intervalSeconds)
         }
         av_packet_unref(packet.get());
     }
+    if (stopped)
+        return {};
     if (err != AVERROR_EOF)
         return fail("av_read_frame failed", err);
 
     avcodec_send_packet(codecCtx.get(), nullptr); // flush
-    if (auto ok = drainDecoder(); !ok)
-        return std::unexpected(ok.error());
+    return drainDecoder();
+}
 
+} // namespace
+
+std::expected<std::vector<cv::Mat>, std::string>
+extractFrames(const std::string& path, double intervalSeconds)
+{
+    std::vector<cv::Mat> result;
+    auto ok = decodeFrames(path, intervalSeconds, [&](cv::Mat frame) {
+        result.push_back(std::move(frame));
+        return true;
+    });
+    if (!ok)
+        return std::unexpected(ok.error());
     return result;
+}
+
+std::expected<void, std::string>
+extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue& queue)
+{
+    struct CloseGuard {
+        FrameQueue& q;
+        ~CloseGuard() { q.close(); }
+    } closeGuard{queue};
+
+    return decodeFrames(path, intervalSeconds,
+                        [&](cv::Mat frame) { return queue.push(std::move(frame)); });
+}
+
+void removeConsecutiveDuplicatesToQueue(FrameQueue& input, FrameQueue& output,
+                                        double tolerance)
+{
+    struct CloseGuard {
+        FrameQueue& q;
+        ~CloseGuard() { q.close(); }
+    } closeGuard{output};
+
+    cv::Mat lastKept;
+    while (auto frame = input.pop()) {
+        if (!lastKept.empty() && framesSimilar(lastKept, *frame, tolerance))
+            continue;
+        lastKept = *frame;
+        if (!output.push(std::move(*frame))) {
+            input.close(); // downstream gave up; stop the upstream producer too
+            return;
+        }
+    }
 }

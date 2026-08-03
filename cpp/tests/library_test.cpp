@@ -3,8 +3,11 @@
 #include <gtest/gtest.h>
 #include <opencv2/imgcodecs.hpp>
 
+#include <chrono>
+#include <future>
 #include <list>
 #include <string>
+#include <thread>
 
 TEST(LibraryTest, HelloPrintsGreeting) {
     testing::internal::CaptureStdout();
@@ -68,6 +71,145 @@ TEST(RemoveConsecutiveDuplicatesTest, DeduplicatesExtractedAbcFrames) {
         ASSERT_FALSE(letter.empty());
         EXPECT_LT(meanAbsDiff(unique[i], letter), 10.0) << names[i];
     }
+}
+
+TEST(ExtractFramesToQueueTest, ProducerPausesOnFullQueueAndDeliversAllFrames) {
+    // Reference: the same sampling done synchronously yields 4 frames
+    // (A, A, B, C at t = 0, 0.9, 1.8, 2.7), so a capacity-2 queue forces
+    // the producer to block at least once.
+    const auto expected = extractFrames(kResourceDir + "/ABC.mp4", 0.9);
+    ASSERT_TRUE(expected.has_value()) << expected.error();
+    ASSERT_EQ(expected->size(), 4u);
+
+    FrameQueue queue(2);
+    auto producer = std::async(std::launch::async, [&] {
+        return extractFramesToQueue(kResourceDir + "/ABC.mp4", 0.9, queue);
+    });
+
+    // With the consumer idle, the producer must stop at capacity and
+    // not finish: the queue holds exactly 2 frames.
+    while (queue.size() < 2)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    EXPECT_EQ(producer.wait_for(std::chrono::milliseconds(200)),
+              std::future_status::timeout);
+    EXPECT_EQ(queue.size(), 2u);
+
+    // Draining the queue unblocks the producer; all frames arrive in order.
+    std::vector<cv::Mat> received;
+    while (auto frame = queue.pop())
+        received.push_back(std::move(*frame));
+
+    const auto result = producer.get();
+    ASSERT_TRUE(result.has_value()) << result.error();
+    ASSERT_EQ(received.size(), expected->size());
+    for (size_t i = 0; i < received.size(); ++i)
+        EXPECT_LT(meanAbsDiff(received[i], (*expected)[i]), 1e-9) << "frame " << i;
+}
+
+TEST(ExtractFramesToQueueTest, ClosesQueueOnError) {
+    FrameQueue queue(2);
+    auto producer = std::async(std::launch::async, [&] {
+        return extractFramesToQueue(kResourceDir + "/does_not_exist.mp4", 0.9, queue);
+    });
+
+    // The queue is closed even on failure, so pop() must not block forever.
+    EXPECT_EQ(queue.pop(), std::nullopt);
+    EXPECT_FALSE(producer.get().has_value());
+}
+
+TEST(ExtractFramesToQueueTest, ConsumerClosingQueueStopsProducer) {
+    FrameQueue queue(1);
+    auto producer = std::async(std::launch::async, [&] {
+        return extractFramesToQueue(kResourceDir + "/ABC.mp4", 0.1, queue);
+    });
+
+    ASSERT_TRUE(queue.pop().has_value());
+    queue.close();
+
+    // The producer notices the closed queue and returns without decoding
+    // the rest of the video; a rejected push is not an error.
+    ASSERT_EQ(producer.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+    EXPECT_TRUE(producer.get().has_value());
+}
+
+TEST(RemoveConsecutiveDuplicatesToQueueTest, DropsNearDuplicatesPreservingOrder) {
+    const cv::Mat black(8, 8, CV_8UC3, cv::Scalar::all(0));
+    const cv::Mat almostBlack(8, 8, CV_8UC3, cv::Scalar::all(3));
+    const cv::Mat white(8, 8, CV_8UC3, cv::Scalar::all(255));
+
+    // Same scenario as the synchronous test:
+    // black, ~black, white, white, black -> black, white, black
+    FrameQueue input(8);
+    FrameQueue output(1); // capacity 1 forces the stage to block on push
+    for (const cv::Mat& frame : {black, almostBlack, white, white, black})
+        ASSERT_TRUE(input.push(frame.clone()));
+    input.close();
+
+    auto stage = std::async(std::launch::async, [&] {
+        removeConsecutiveDuplicatesToQueue(input, output, 5.0);
+    });
+
+    std::vector<cv::Mat> result;
+    while (auto frame = output.pop())
+        result.push_back(std::move(*frame));
+    stage.get();
+
+    ASSERT_EQ(result.size(), 3u);
+    EXPECT_LT(meanAbsDiff(result[0], black), 1e-9);
+    EXPECT_LT(meanAbsDiff(result[1], white), 1e-9);
+    EXPECT_LT(meanAbsDiff(result[2], black), 1e-9);
+}
+
+TEST(RemoveConsecutiveDuplicatesToQueueTest, PipelinesFromExtractFramesToQueue) {
+    // Full producer -> dedup -> consumer pipeline on the ABC video, each
+    // stage on its own thread with small queues. Must match the synchronous
+    // extractFrames + removeConsecutiveDuplicates result: exactly A, B, C.
+    FrameQueue decoded(2);
+    FrameQueue unique(2);
+
+    auto producer = std::async(std::launch::async, [&] {
+        return extractFramesToQueue(kResourceDir + "/ABC.mp4", 0.4, decoded);
+    });
+    auto dedup = std::async(std::launch::async, [&] {
+        removeConsecutiveDuplicatesToQueue(decoded, unique, 10.0);
+    });
+
+    std::vector<cv::Mat> result;
+    while (auto frame = unique.pop())
+        result.push_back(std::move(*frame));
+
+    dedup.get();
+    const auto produced = producer.get();
+    ASSERT_TRUE(produced.has_value()) << produced.error();
+
+    ASSERT_EQ(result.size(), 3u);
+    const char* names[] = {"A.png", "B.png", "C.png"};
+    for (int i = 0; i < 3; ++i) {
+        const cv::Mat letter = cv::imread(kResourceDir + "/" + names[i]);
+        ASSERT_FALSE(letter.empty());
+        EXPECT_LT(meanAbsDiff(result[i], letter), 10.0) << names[i];
+    }
+}
+
+TEST(RemoveConsecutiveDuplicatesToQueueTest, ClosingOutputStopsWholePipeline) {
+    FrameQueue decoded(1);
+    FrameQueue unique(1);
+
+    auto producer = std::async(std::launch::async, [&] {
+        return extractFramesToQueue(kResourceDir + "/ABC.mp4", 0.1, decoded);
+    });
+    auto dedup = std::async(std::launch::async, [&] {
+        removeConsecutiveDuplicatesToQueue(decoded, unique, 10.0);
+    });
+
+    // Take one frame, then cancel from the consumer end. The dedup stage
+    // must close its input, which in turn stops the producer.
+    ASSERT_TRUE(unique.pop().has_value());
+    unique.close();
+
+    ASSERT_EQ(dedup.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+    ASSERT_EQ(producer.wait_for(std::chrono::seconds(5)), std::future_status::ready);
+    EXPECT_TRUE(producer.get().has_value());
 }
 
 TEST(ExtractFramesTest, SamplesAbcVideoEveryPointNineSeconds) {
