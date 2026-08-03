@@ -2,8 +2,34 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="DataGenUI.MainWindow"
-        Title="DataGenUI">
-    Welcome to Avalonia!
+        Title="Frame Review"
+        Width="800" Height="600">
+    <DockPanel Margin="12">
+
+        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="Server:" VerticalAlignment="Center"/>
+            <TextBox x:Name="ServerBox" Text="http://localhost:15071" Width="220"/>
+            <Button x:Name="OpenButton" Content="Open Video…" Click="OnOpenVideo"/>
+        </StackPanel>
+
+        <StackPanel DockPanel.Dock="Bottom" Spacing="8">
+            <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+                <Button x:Name="KeepButton" Content="Keep" IsEnabled="False"
+                        MinWidth="100" Click="OnKeep"/>
+                <Button x:Name="SkipButton" Content="Skip" IsEnabled="False"
+                        MinWidth="100" Click="OnSkip"/>
+                <Button x:Name="StopButton" Content="Stop" IsEnabled="False"
+                        MinWidth="100" Click="OnStop"/>
+            </StackPanel>
+            <TextBlock x:Name="StatusText" Text="Open a video to start a session."
+                       HorizontalAlignment="Center"/>
+        </StackPanel>
+
+        <Border BorderBrush="Gray" BorderThickness="1" Margin="0,12">
+            <Image x:Name="FrameImage" Stretch="Uniform"/>
+        </Border>
+
+    </DockPanel>
 </Window>
