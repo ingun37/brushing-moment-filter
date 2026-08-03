@@ -4,8 +4,10 @@ package frameservice;
 
 // Interactive frame extraction. The client opens one Session stream per
 // video: it uploads the mp4 as VideoChunks, then the server pipelines it
-// through decode -> dedup -> downsample and sends the first Frame. Each
-// subsequent Frame is sent in response to a Next request. The session ends
+// through decode -> dedup -> downsample and sends the first Frames batch
+// (a single frame). Each subsequent Frames batch is sent in response to a
+// Next request and holds up to `count` frames (fewer only when the pipeline
+// drains mid-batch; a subsequent Next then yields EndOfFile). The session ends
 // with EndOfFile, a Stop request, stream cancellation, or the server-side
 // idle timeout. There is no explicit heartbeat: gRPC keepalive covers
 // connection liveness, and waiting longer is just not sending Next yet.
@@ -16,7 +18,7 @@ service FrameService {
 message ClientMessage {
   oneof msg {
     VideoChunk chunk = 1; // upload, in order; `last` marks the final chunk
-    Next next = 2;        // send the next frame
+    Next next = 2;        // send the next batch of frames
     Stop stop = 3;        // terminate the session
   }
 }
@@ -26,18 +28,20 @@ message VideoChunk {
   bool last = 2;
 }
 
-message Next {}
+message Next {
+  uint32 count = 1; // frames wanted in the next batch; 0 is treated as 1
+}
 message Stop {}
 
 message ServerMessage {
   oneof msg {
-    Frame frame = 1;      // one extracted frame
+    Frames frames = 1;    // a batch of extracted frames
     EndOfFile eof = 2;    // pipeline drained; session terminates
   }
 }
 
-message Frame {
-  bytes png = 1;
+message Frames {
+  repeated bytes pngs = 1;
 }
 
 message EndOfFile {}

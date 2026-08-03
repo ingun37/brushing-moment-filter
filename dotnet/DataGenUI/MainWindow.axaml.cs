@@ -127,7 +127,8 @@ public partial class MainWindow : Window
         SetReviewEnabled(false);
         try
         {
-            await _call.RequestStream.WriteAsync(new ClientMessage { Next = new Next() });
+            // This client always reviews one frame at a time.
+            await _call.RequestStream.WriteAsync(new ClientMessage { Next = new Next { Count = 1 } });
             _frameIndex++;
             await ShowNextFrameAsync();
         }
@@ -153,7 +154,8 @@ public partial class MainWindow : Window
             return;
         }
 
-        _currentPng = message.Frame.Png.ToByteArray();
+        // We only ever request one frame per batch, so take the first.
+        _currentPng = message.Frames.Pngs[0].ToByteArray();
         using var stream = new MemoryStream(_currentPng);
         FrameImage.Source = new Bitmap(stream);
         StatusText.Text = $"Frame {_frameIndex + 1} — kept {_keptCount} so far";

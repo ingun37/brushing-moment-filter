@@ -4,6 +4,7 @@
 
 #include <opencv2/imgcodecs.hpp>
 
+#include <algorithm>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -109,16 +110,25 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
     return path;
 }
 
-bool sendFrame(Stream& stream, const cv::Mat& frame)
+// Pops up to `count` frames and sends them as one Frames batch. Returns the
+// number of frames sent, or unexpected on a write/encode failure.
+std::expected<std::size_t, std::string>
+sendFrames(Stream& stream, FrameQueue& queue, std::size_t count)
 {
-    std::vector<uchar> png;
-    if (!cv::imencode(".png", frame, png)) {
-        std::cerr << "png encoding failed\n";
-        return false;
-    }
     frameservice::ServerMessage message;
-    message.mutable_frame()->set_png(png.data(), png.size());
-    return stream.Write(message);
+    auto& frames = *message.mutable_frames();
+    for (std::size_t i = 0; i < count; ++i) {
+        auto frame = queue.pop();
+        if (!frame) // pipeline drained mid-batch: send what we have
+            break;
+        std::vector<uchar> png;
+        if (!cv::imencode(".png", *frame, png))
+            return std::unexpected("png encoding failed");
+        frames.add_pngs(png.data(), png.size());
+    }
+    if (frames.pngs_size() > 0 && !stream.Write(message))
+        return std::unexpected("client went away");
+    return static_cast<std::size_t>(frames.pngs_size());
 }
 
 } // namespace
@@ -147,10 +157,15 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
 
     grpc::Status status = grpc::Status::OK;
 
-    // Send the first frame unprompted, then one frame per Next.
+    // Send the first frame unprompted, then up to Next.count frames per Next.
+    std::size_t count = 1;
     while (true) {
-        auto frame = unique.pop();
-        if (!frame) { // pipeline drained: report end of file and terminate
+        const auto sent = sendFrames(*stream, unique, count);
+        if (!sent) {
+            std::cerr << sent.error() << "\n";
+            break;
+        }
+        if (*sent == 0) { // pipeline drained: report end of file and terminate
             if (!extracted) {
                 status = {grpc::StatusCode::INVALID_ARGUMENT,
                           "decoding failed: " + extracted.error()};
@@ -161,8 +176,6 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
             stream->Write(message);
             break;
         }
-        if (!sendFrame(*stream, *frame))
-            break; // client went away
 
         frameservice::ClientMessage request;
         if (!timedRead(*stream, watchdog, request) || request.has_stop())
@@ -171,6 +184,7 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
             status = {grpc::StatusCode::INVALID_ARGUMENT, "expected Next or Stop"};
             break;
         }
+        count = std::max<std::size_t>(request.next().count(), 1);
     }
 
     // Unblock any still-running stage; close() propagates upstream.

@@ -5,6 +5,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -58,9 +59,9 @@ void upload(Stream& stream, const std::string& path) {
     }
 }
 
-void requestNext(Stream& stream) {
+void requestNext(Stream& stream, std::uint32_t count = 1) {
     frameservice::ClientMessage message;
-    message.mutable_next();
+    message.mutable_next()->set_count(count);
     ASSERT_TRUE(stream.Write(message));
 }
 
@@ -89,8 +90,9 @@ TEST(FrameServiceTest, FullSessionYieldsOneFramePerNumberThenEof) {
     std::vector<cv::Mat> frames;
     frameservice::ServerMessage response;
     while (stream->Read(&response) && !response.has_eof()) {
-        ASSERT_TRUE(response.has_frame());
-        frames.push_back(decodePng(response.frame().png()));
+        ASSERT_TRUE(response.has_frames());
+        ASSERT_EQ(response.frames().pngs_size(), 1);
+        frames.push_back(decodePng(response.frames().pngs(0)));
         ASSERT_FALSE(frames.back().empty());
         requestNext(*stream);
     }
@@ -98,6 +100,40 @@ TEST(FrameServiceTest, FullSessionYieldsOneFramePerNumberThenEof) {
     stream->WritesDone();
     EXPECT_TRUE(stream->Finish().ok());
 
+    ASSERT_EQ(frames.size(), 12u);
+    for (int i = 0; i < 12; ++i) {
+        const cv::Mat number =
+            cv::imread(kResourceDir + "/" + std::to_string(i) + ".png");
+        ASSERT_FALSE(number.empty());
+        EXPECT_LT(meanAbsDiff(frames[i], number), 10.0) << "frame " << i;
+    }
+}
+
+TEST(FrameServiceTest, NextCountBatchesFramesPerResponse) {
+    TestServer server(countingVideoOptions());
+    grpc::ClientContext ctx;
+    auto stream = server.stub().Session(&ctx);
+    upload(*stream, kResourceDir + "/12.mp4");
+
+    // First response is a single unprompted frame; then ask for 5 at a time.
+    // 12 unique frames total -> batches of 1, 5, 5, 1, then eof.
+    std::vector<int> batchSizes;
+    std::vector<cv::Mat> frames;
+    frameservice::ServerMessage response;
+    while (stream->Read(&response) && !response.has_eof()) {
+        ASSERT_TRUE(response.has_frames());
+        batchSizes.push_back(response.frames().pngs_size());
+        for (const auto& png : response.frames().pngs()) {
+            frames.push_back(decodePng(png));
+            ASSERT_FALSE(frames.back().empty());
+        }
+        requestNext(*stream, 5);
+    }
+    EXPECT_TRUE(response.has_eof());
+    stream->WritesDone();
+    EXPECT_TRUE(stream->Finish().ok());
+
+    EXPECT_EQ(batchSizes, (std::vector<int>{1, 5, 5, 1}));
     ASSERT_EQ(frames.size(), 12u);
     for (int i = 0; i < 12; ++i) {
         const cv::Mat number =
@@ -115,7 +151,7 @@ TEST(FrameServiceTest, StopTerminatesSessionEarly) {
 
     frameservice::ServerMessage response;
     ASSERT_TRUE(stream->Read(&response));
-    ASSERT_TRUE(response.has_frame());
+    ASSERT_TRUE(response.has_frames());
 
     frameservice::ClientMessage stop;
     stop.mutable_stop();
@@ -136,7 +172,7 @@ TEST(FrameServiceTest, SilentClientIsCancelledAfterIdleTimeout) {
 
     frameservice::ServerMessage response;
     ASSERT_TRUE(stream->Read(&response));
-    ASSERT_TRUE(response.has_frame());
+    ASSERT_TRUE(response.has_frames());
 
     // Send no request: the server must cancel the session after ~1 s.
     const auto start = std::chrono::steady_clock::now();

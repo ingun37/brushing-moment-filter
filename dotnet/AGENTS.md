@@ -14,5 +14,6 @@ Skip just requests the next, Stop ends the session.
   and ticks between user clicks.
 - No MVVM: the template is plain code-behind (`MainWindow.axaml.cs` holds the gRPC session
   state). Fine at this size; introduce a view model only if the UI grows.
-- The gRPC session is strict ping-pong after upload (server sends first frame unprompted, then
-  exactly one frame per `Next`); buttons are disabled while a frame is in flight.
+- The gRPC session is strict ping-pong after upload (server sends the first frame unprompted,
+  then up to `Next.count` frames per `Next`; this client always sends `count = 1`); buttons
+  are disabled while a frame is in flight.
