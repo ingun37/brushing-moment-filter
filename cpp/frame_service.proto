@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package frameservice;
+
+// Interactive frame extraction. The client opens one Session stream per
+// video: it uploads the mp4 as VideoChunks, then the server pipelines it
+// through decode -> dedup -> downsample and sends the first Frame. Each
+// subsequent Frame is sent in response to a Next request. The session ends
+// with EndOfFile, a Stop request, stream cancellation, or the server-side
+// idle timeout. There is no explicit heartbeat: gRPC keepalive covers
+// connection liveness, and waiting longer is just not sending Next yet.
+service FrameService {
+  rpc Session(stream ClientMessage) returns (stream ServerMessage);
+}
+
+message ClientMessage {
+  oneof msg {
+    VideoChunk chunk = 1; // upload, in order; `last` marks the final chunk
+    Next next = 2;        // send the next frame
+    Stop stop = 3;        // terminate the session
+  }
+}
+
+message VideoChunk {
+  bytes data = 1;
+  bool last = 2;
+}
+
+message Next {}
+message Stop {}
+
+message ServerMessage {
+  oneof msg {
+    Frame frame = 1;      // one extracted frame
+    EndOfFile eof = 2;    // pipeline drained; session terminates
+  }
+}
+
+message Frame {
+  bytes png = 1;
+}
+
+message EndOfFile {}
