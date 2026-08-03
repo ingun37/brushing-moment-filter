@@ -117,4 +117,14 @@ extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue
 void removeConsecutiveDuplicatesToQueue(FrameQueue& input, FrameQueue& output,
                                         double tolerance);
 
+// Pipeline stage that downsamples in batches: buffers `batchSize` (N) frames
+// from `input`, forwards the `sampleCount` (M <= N) frames at regular
+// intervals within the batch (indices i*N/M for i = 0..M-1), discards the
+// rest, and repeats. A final partial batch uses the same index pattern,
+// truncated to the frames that exist. Runs until `input` is closed and
+// drained; `output` is always closed before returning. If the downstream
+// consumer closes `output` early, `input` is closed too.
+void downsampleToQueue(FrameQueue& input, FrameQueue& output,
+                       std::size_t batchSize, std::size_t sampleCount);
+
 #endif // FFMPEG_PLAYGROUND_LIBRARY_H
