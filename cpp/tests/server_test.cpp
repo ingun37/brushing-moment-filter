@@ -86,9 +86,10 @@ TEST(FrameServiceTest, FullSessionYieldsOneFramePerNumberThenEof) {
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
 
-    // First frame arrives unprompted; each Next yields one more; then eof.
+    // Each Next yields one frame; a Next past the last frame yields eof.
     std::vector<cv::Mat> frames;
     frameservice::ServerMessage response;
+    requestNext(*stream);
     while (stream->Read(&response) && !response.has_eof()) {
         ASSERT_TRUE(response.has_frames());
         ASSERT_EQ(response.frames().pngs_size(), 1);
@@ -115,11 +116,12 @@ TEST(FrameServiceTest, NextCountBatchesFramesPerResponse) {
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
 
-    // First response is a single unprompted frame; then ask for 5 at a time.
-    // 12 unique frames total -> batches of 1, 5, 5, 1, then eof.
+    // Ask for 5 frames at a time. 12 unique frames total -> batches of
+    // 5, 5, 2, then eof.
     std::vector<int> batchSizes;
     std::vector<cv::Mat> frames;
     frameservice::ServerMessage response;
+    requestNext(*stream, 5);
     while (stream->Read(&response) && !response.has_eof()) {
         ASSERT_TRUE(response.has_frames());
         batchSizes.push_back(response.frames().pngs_size());
@@ -133,7 +135,7 @@ TEST(FrameServiceTest, NextCountBatchesFramesPerResponse) {
     stream->WritesDone();
     EXPECT_TRUE(stream->Finish().ok());
 
-    EXPECT_EQ(batchSizes, (std::vector<int>{1, 5, 5, 1}));
+    EXPECT_EQ(batchSizes, (std::vector<int>{5, 5, 2}));
     ASSERT_EQ(frames.size(), 12u);
     for (int i = 0; i < 12; ++i) {
         const cv::Mat number =
@@ -148,6 +150,7 @@ TEST(FrameServiceTest, StopTerminatesSessionEarly) {
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
+    requestNext(*stream);
 
     frameservice::ServerMessage response;
     ASSERT_TRUE(stream->Read(&response));
@@ -169,6 +172,7 @@ TEST(FrameServiceTest, SilentClientIsCancelledAfterIdleTimeout) {
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
+    requestNext(*stream);
 
     frameservice::ServerMessage response;
     ASSERT_TRUE(stream->Read(&response));
@@ -207,6 +211,7 @@ TEST(FrameServiceTest, UndecodableVideoReportsError) {
     message.mutable_chunk()->set_data("this is not an mp4 file");
     message.mutable_chunk()->set_last(true);
     ASSERT_TRUE(stream->Write(message));
+    requestNext(*stream); // the decode error is reported in reply to a Next
     stream->WritesDone();
 
     frameservice::ServerMessage response;

@@ -157,9 +157,17 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
 
     grpc::Status status = grpc::Status::OK;
 
-    // Send the first frame unprompted, then up to Next.count frames per Next.
-    std::size_t count = 1;
+    // Send up to Next.count frames per Next, including the first one.
     while (true) {
+        frameservice::ClientMessage request;
+        if (!timedRead(*stream, watchdog, request) || request.has_stop())
+            break; // stop, timeout, or disconnect
+        if (!request.has_next()) {
+            status = {grpc::StatusCode::INVALID_ARGUMENT, "expected Next or Stop"};
+            break;
+        }
+        const auto count = std::max<std::size_t>(request.next().count(), 1);
+
         const auto sent = sendFrames(*stream, unique, count);
         if (!sent) {
             std::cerr << sent.error() << "\n";
@@ -176,15 +184,6 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
             stream->Write(message);
             break;
         }
-
-        frameservice::ClientMessage request;
-        if (!timedRead(*stream, watchdog, request) || request.has_stop())
-            break; // stop, timeout, or disconnect
-        if (!request.has_next()) {
-            status = {grpc::StatusCode::INVALID_ARGUMENT, "expected Next or Stop"};
-            break;
-        }
-        count = std::max<std::size_t>(request.next().count(), 1);
     }
 
     // Unblock any still-running stage; close() propagates upstream.

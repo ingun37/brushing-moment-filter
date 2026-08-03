@@ -16,9 +16,9 @@
 
         <StackPanel DockPanel.Dock="Bottom" Spacing="8">
             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
-                <Button x:Name="KeepButton" Content="Keep" IsEnabled="False"
+                <Button x:Name="KeepButton" Content="Keep Selected" IsEnabled="False"
                         MinWidth="100" Click="OnKeep"/>
-                <Button x:Name="SkipButton" Content="Skip" IsEnabled="False"
+                <Button x:Name="SkipButton" Content="Skip All" IsEnabled="False"
                         MinWidth="100" Click="OnSkip"/>
                 <Button x:Name="StopButton" Content="Stop" IsEnabled="False"
                         MinWidth="100" Click="OnStop"/>
@@ -28,7 +28,14 @@
         </StackPanel>
 
         <Border BorderBrush="Gray" BorderThickness="1" Margin="0,12">
-            <Image x:Name="FrameImage" Stretch="Uniform"/>
+            <ListBox x:Name="FrameList" SelectionMode="Multiple,Toggle"
+                     ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                <ListBox.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Columns="4"/>
+                    </ItemsPanelTemplate>
+                </ListBox.ItemsPanel>
+            </ListBox>
         </Border>
 
     </DockPanel>
