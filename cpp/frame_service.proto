@@ -42,6 +42,8 @@ message ServerMessage {
 
 message Frames {
   repeated bytes pngs = 1;
+  // Presentation time of each frame in the source video, parallel to `pngs`.
+  repeated double timestamps_seconds = 2;
 }
 
 message EndOfFile {}

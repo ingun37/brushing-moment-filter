@@ -60,11 +60,11 @@ struct SwsGuard {
     ~SwsGuard() { sws_freeContext(ctx); }
 };
 
-// Decodes the video at `path` and passes each sampled BGR frame to `sink`.
-// Stops early if `sink` returns false.
+// Decodes the video at `path` and passes each sampled BGR frame and its
+// presentation time (seconds) to `sink`. Stops early if `sink` returns false.
 std::expected<void, std::string>
 decodeFrames(const std::string& path, double intervalSeconds,
-             const std::function<bool(cv::Mat)>& sink)
+             const std::function<bool(cv::Mat, double)>& sink)
 {
     if (intervalSeconds <= 0)
         return fail("intervalSeconds must be positive");
@@ -112,7 +112,7 @@ decodeFrames(const std::string& path, double intervalSeconds,
             auto mat = toBgrMat(f, sws.ctx);
             if (!mat)
                 return std::unexpected(mat.error());
-            if (!sink(std::move(*mat))) {
+            if (!sink(std::move(*mat), t)) {
                 stopped = true;
                 return {};
             }
@@ -155,7 +155,7 @@ std::expected<std::vector<cv::Mat>, std::string>
 extractFrames(const std::string& path, double intervalSeconds)
 {
     std::vector<cv::Mat> result;
-    auto ok = decodeFrames(path, intervalSeconds, [&](cv::Mat frame) {
+    auto ok = decodeFrames(path, intervalSeconds, [&](cv::Mat frame, double) {
         result.push_back(std::move(frame));
         return true;
     });
@@ -172,8 +172,9 @@ extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue
         ~CloseGuard() { q.close(); }
     } closeGuard{queue};
 
-    return decodeFrames(path, intervalSeconds,
-                        [&](cv::Mat frame) { return queue.push(std::move(frame)); });
+    return decodeFrames(path, intervalSeconds, [&](cv::Mat frame, double t) {
+        return queue.push({std::move(frame), t});
+    });
 }
 
 void removeConsecutiveDuplicatesToQueue(FrameQueue& input, FrameQueue& output,
@@ -186,9 +187,9 @@ void removeConsecutiveDuplicatesToQueue(FrameQueue& input, FrameQueue& output,
 
     cv::Mat lastKept;
     while (auto frame = input.pop()) {
-        if (!lastKept.empty() && framesSimilar(lastKept, *frame, tolerance))
+        if (!lastKept.empty() && framesSimilar(lastKept, frame->image, tolerance))
             continue;
-        lastKept = *frame;
+        lastKept = frame->image;
         if (!output.push(std::move(*frame))) {
             input.close(); // downstream gave up; stop the upstream producer too
             return;

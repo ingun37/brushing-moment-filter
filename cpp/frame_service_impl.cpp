@@ -122,9 +122,10 @@ sendFrames(Stream& stream, FrameQueue& queue, std::size_t count)
         if (!frame) // pipeline drained mid-batch: send what we have
             break;
         std::vector<uchar> png;
-        if (!cv::imencode(".png", *frame, png))
+        if (!cv::imencode(".png", frame->image, png))
             return std::unexpected("png encoding failed");
         frames.add_pngs(png.data(), png.size());
+        frames.add_timestamps_seconds(frame->timestampSeconds);
     }
     if (frames.pngs_size() > 0 && !stream.Write(message))
         return std::unexpected("client went away");

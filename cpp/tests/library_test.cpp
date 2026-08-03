@@ -95,16 +95,22 @@ TEST(ExtractFramesToQueueTest, ProducerPausesOnFullQueueAndDeliversAllFrames) {
               std::future_status::timeout);
     EXPECT_EQ(queue.size(), 2u);
 
-    // Draining the queue unblocks the producer; all frames arrive in order.
-    std::vector<cv::Mat> received;
+    // Draining the queue unblocks the producer; all frames arrive in order,
+    // each stamped with its presentation time.
+    std::vector<TimedFrame> received;
     while (auto frame = queue.pop())
         received.push_back(std::move(*frame));
 
     const auto result = producer.get();
     ASSERT_TRUE(result.has_value()) << result.error();
     ASSERT_EQ(received.size(), expected->size());
-    for (size_t i = 0; i < received.size(); ++i)
-        EXPECT_LT(meanAbsDiff(received[i], (*expected)[i]), 1e-9) << "frame " << i;
+    for (size_t i = 0; i < received.size(); ++i) {
+        EXPECT_LT(meanAbsDiff(received[i].image, (*expected)[i]), 1e-9) << "frame " << i;
+        // Sampled at t = 0, 0.9, 1.8, 2.7: each timestamp is the first frame
+        // at or after the sampling point, so it lies within one frame period.
+        EXPECT_GE(received[i].timestampSeconds, i * 0.9) << "frame " << i;
+        EXPECT_LT(received[i].timestampSeconds, i * 0.9 + 0.2) << "frame " << i;
+    }
 }
 
 TEST(ExtractFramesToQueueTest, ClosesQueueOnError) {
@@ -143,7 +149,7 @@ TEST(RemoveConsecutiveDuplicatesToQueueTest, DropsNearDuplicatesPreservingOrder)
     FrameQueue input(8);
     FrameQueue output(1); // capacity 1 forces the stage to block on push
     for (const cv::Mat& frame : {black, almostBlack, white, white, black})
-        ASSERT_TRUE(input.push(frame.clone()));
+        ASSERT_TRUE(input.push({frame.clone(), 0.0}));
     input.close();
 
     auto stage = std::async(std::launch::async, [&] {
@@ -152,7 +158,7 @@ TEST(RemoveConsecutiveDuplicatesToQueueTest, DropsNearDuplicatesPreservingOrder)
 
     std::vector<cv::Mat> result;
     while (auto frame = output.pop())
-        result.push_back(std::move(*frame));
+        result.push_back(std::move(frame->image));
     stage.get();
 
     ASSERT_EQ(result.size(), 3u);
@@ -177,7 +183,7 @@ TEST(RemoveConsecutiveDuplicatesToQueueTest, PipelinesFromExtractFramesToQueue) 
 
     std::vector<cv::Mat> result;
     while (auto frame = unique.pop())
-        result.push_back(std::move(*frame));
+        result.push_back(std::move(frame->image));
 
     dedup.get();
     const auto produced = producer.get();

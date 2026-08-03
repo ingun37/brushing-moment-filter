@@ -57,7 +57,7 @@ filterStage(stdexec::scheduler auto scheduler, FrameQueue& in, FrameQueue& out,
                    ~CloseGuard() { q.close(); }
                } closeGuard{out};
                while (auto frame = in.pop()) {
-                   if (!keep(*frame))
+                   if (!keep(frame->image))
                        continue;
                    if (!out.push(std::move(*frame))) {
                        in.close();
@@ -76,7 +76,7 @@ collectStage(stdexec::scheduler auto scheduler, FrameQueue& in)
          | stdexec::then([&in] {
                std::vector<cv::Mat> frames;
                while (auto frame = in.pop())
-                   frames.push_back(std::move(*frame));
+                   frames.push_back(std::move(frame->image));
                return frames;
            });
 }

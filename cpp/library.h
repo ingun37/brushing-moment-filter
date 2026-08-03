@@ -40,6 +40,12 @@ std::vector<cv::Mat> removeConsecutiveDuplicates(R&& frames, double tolerance)
 std::expected<std::vector<cv::Mat>, std::string>
 extractFrames(const std::string& path, double intervalSeconds);
 
+// A decoded frame plus its presentation time in the source video.
+struct TimedFrame {
+    cv::Mat image;
+    double timestampSeconds = 0.0;
+};
+
 // Thread-safe bounded FIFO of frames. push() blocks while the queue is at
 // capacity; pop() blocks while it is empty. close() unblocks everyone:
 // subsequent pushes are rejected and pop() drains what is left, then
@@ -50,7 +56,7 @@ public:
 
     // Blocks until there is room (or the queue is closed).
     // Returns false if the queue was closed, in which case the frame is dropped.
-    bool push(cv::Mat frame)
+    bool push(TimedFrame frame)
     {
         std::unique_lock lock(mutex_);
         notFull_.wait(lock, [&] { return frames_.size() < capacity_ || closed_; });
@@ -63,13 +69,13 @@ public:
 
     // Blocks until a frame is available; returns nullopt once the queue is
     // closed and drained.
-    std::optional<cv::Mat> pop()
+    std::optional<TimedFrame> pop()
     {
         std::unique_lock lock(mutex_);
         notEmpty_.wait(lock, [&] { return !frames_.empty() || closed_; });
         if (frames_.empty())
             return std::nullopt;
-        cv::Mat frame = std::move(frames_.front());
+        TimedFrame frame = std::move(frames_.front());
         frames_.pop_front();
         notFull_.notify_one();
         return frame;
@@ -96,7 +102,7 @@ private:
     mutable std::mutex mutex_;
     std::condition_variable notFull_;
     std::condition_variable notEmpty_;
-    std::deque<cv::Mat> frames_;
+    std::deque<TimedFrame> frames_;
     bool closed_ = false;
 };
 
