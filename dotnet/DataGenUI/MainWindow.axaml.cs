@@ -22,9 +22,10 @@ public partial class MainWindow : Window
     private AsyncDuplexStreamingCall<ClientMessage, ServerMessage>? _call;
     private readonly List<byte[]> _batchPngs = [];
     private bool _eofReceived;
-    private string _keepDir = "";
+    private string _positiveDir = "";
+    private string _negativeDir = "";
     private int _frameIndex; // index of the first frame of the current batch
-    private int _keptCount;
+    private int _positiveCount;
 
     public MainWindow()
     {
@@ -48,11 +49,12 @@ public partial class MainWindow : Window
         }
 
         await EndSessionAsync();
-        _keepDir = Path.Combine(
-            Path.GetDirectoryName(path)!,
-            Path.GetFileNameWithoutExtension(path) + "_kept");
+        var videoName = Path.GetFileNameWithoutExtension(path);
+        var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
+        _positiveDir = Path.Combine(dataDir, "positive", videoName);
+        _negativeDir = Path.Combine(dataDir, "negative", videoName);
         _frameIndex = 0;
-        _keptCount = 0;
+        _positiveCount = 0;
         _eofReceived = false;
         _batchPngs.Clear();
         FrameList.Items.Clear();
@@ -108,20 +110,31 @@ public partial class MainWindow : Window
     {
         var selected = FrameList.SelectedItems!.Cast<ListBoxItem>()
             .Select(item => (int)item.Tag!)
-            .OrderBy(i => i);
-        Directory.CreateDirectory(_keepDir);
-        foreach (var i in selected)
-        {
-            var name = Path.Combine(_keepDir, $"frame_{_frameIndex + i:D4}.png");
-            await File.WriteAllBytesAsync(name, _batchPngs[i]);
-            _keptCount++;
-        }
+            .ToHashSet();
+        await SaveBatchAsync(selected);
         await RequestNextBatchAsync();
     }
 
     private async void OnSkip(object? sender, RoutedEventArgs e)
     {
+        await SaveBatchAsync([]);
         await RequestNextBatchAsync();
+    }
+
+    // Writes every frame of the current batch: selected ones to the positive
+    // directory, the rest to the negative directory.
+    private async Task SaveBatchAsync(HashSet<int> selected)
+    {
+        for (var i = 0; i < _batchPngs.Count; i++)
+        {
+            var positive = selected.Contains(i);
+            var dir = positive ? _positiveDir : _negativeDir;
+            Directory.CreateDirectory(dir);
+            var name = Path.Combine(dir, $"frame_{_frameIndex + i:D4}.png");
+            await File.WriteAllBytesAsync(name, _batchPngs[i]);
+            if (positive)
+                _positiveCount++;
+        }
     }
 
     private async void OnStop(object? sender, RoutedEventArgs e)
@@ -138,7 +151,7 @@ public partial class MainWindow : Window
             }
         }
         await EndSessionAsync();
-        StatusText.Text = $"Stopped. Kept {_keptCount} frame(s) in {_keepDir}";
+        StatusText.Text = $"Stopped. {_positiveCount} positive frame(s) in {_positiveDir}";
     }
 
     private async Task RequestNextBatchAsync()
@@ -153,7 +166,7 @@ public partial class MainWindow : Window
         if (_eofReceived)
         {
             await EndSessionAsync();
-            StatusText.Text = $"End of video. Kept {_keptCount} frame(s) in {_keepDir}";
+            StatusText.Text = $"End of video. {_positiveCount} positive frame(s) in {_positiveDir}";
             return;
         }
 
@@ -195,7 +208,7 @@ public partial class MainWindow : Window
         if (_batchPngs.Count == 0) // eof with nothing left to review
         {
             await EndSessionAsync();
-            StatusText.Text = $"End of video. Kept {_keptCount} frame(s) in {_keepDir}";
+            StatusText.Text = $"End of video. {_positiveCount} positive frame(s) in {_positiveDir}";
             return;
         }
 
@@ -210,7 +223,7 @@ public partial class MainWindow : Window
             });
         }
         StatusText.Text =
-            $"Frames {_frameIndex + 1}–{_frameIndex + _batchPngs.Count} — kept {_keptCount} so far. " +
+            $"Frames {_frameIndex + 1}–{_frameIndex + _batchPngs.Count} — {_positiveCount} positive so far. " +
             "Select the frames to keep.";
         SetReviewEnabled(true);
     }
