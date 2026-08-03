@@ -12,6 +12,7 @@
             <TextBlock Text="Server:" VerticalAlignment="Center"/>
             <TextBox x:Name="ServerBox" Text="http://localhost:15071" Width="220"/>
             <Button x:Name="OpenButton" Content="Open Video…" Click="OnOpenVideo"/>
+            <Button x:Name="ClearButton" Content="Clear" Click="OnClear"/>
         </StackPanel>
 
         <StackPanel DockPanel.Dock="Bottom" Spacing="8">

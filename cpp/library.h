@@ -35,10 +35,11 @@ std::vector<cv::Mat> removeConsecutiveDuplicates(R&& frames, double tolerance)
 }
 
 // Decodes the video at `path` and returns one BGR frame for each sampling
-// point t = 0, interval, 2*interval, ... within the video's duration.
-// On I/O or decoding failure, returns an error message instead.
+// point t = start, start + interval, start + 2*interval, ... within the
+// video's duration. On I/O or decoding failure, returns an error message.
 std::expected<std::vector<cv::Mat>, std::string>
-extractFrames(const std::string& path, double intervalSeconds);
+extractFrames(const std::string& path, double intervalSeconds,
+              double startSeconds = 0.0);
 
 // A decoded frame plus its presentation time in the source video.
 struct TimedFrame {
@@ -111,7 +112,8 @@ private:
 // The queue is always closed before returning (success, error, or when the
 // consumer closes the queue early, which stops decoding).
 std::expected<void, std::string>
-extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue& queue);
+extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue& queue,
+                     double startSeconds = 0.0);
 
 // Like removeConsecutiveDuplicates, but meant to run as a pipeline stage on
 // its own thread: frames are popped from `input` and each frame that is not

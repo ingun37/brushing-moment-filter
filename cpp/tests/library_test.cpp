@@ -272,6 +272,20 @@ TEST(PipelineTest, CustomFilterStageComposesIntoPipeline) {
     EXPECT_LT(meanAbsDiff(frames[1], c), 10.0);
 }
 
+TEST(ExtractFramesTest, StartSecondsSkipsTheBeginning) {
+    // Sampling at t = 1.0, 1.9, 2.8 skips the A second entirely: B, B, C.
+    const auto result = extractFrames(kResourceDir + "/ABC.mp4", 0.9, 1.0);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    ASSERT_EQ(result->size(), 3u);
+
+    const cv::Mat b = cv::imread(kResourceDir + "/B.png");
+    const cv::Mat c = cv::imread(kResourceDir + "/C.png");
+    ASSERT_FALSE(b.empty() || c.empty());
+    EXPECT_LT(meanAbsDiff((*result)[0], b), 10.0);
+    EXPECT_LT(meanAbsDiff((*result)[1], b), 10.0);
+    EXPECT_LT(meanAbsDiff((*result)[2], c), 10.0);
+}
+
 TEST(ExtractFramesTest, SamplesAbcVideoEveryPointNineSeconds) {
     // 3 s video, one letter per second. Sampling at t = 0, 0.9, 1.8, 2.7
     // should yield A, A, B, C.

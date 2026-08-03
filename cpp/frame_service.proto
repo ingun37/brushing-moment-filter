@@ -26,6 +26,9 @@ message ClientMessage {
 message VideoChunk {
   bytes data = 1;
   bool last = 2;
+  // Sampling starts at this presentation time instead of 0 (for resuming a
+  // previous session). Only read from the first chunk of the upload.
+  double start_seconds = 3;
 }
 
 message Next {

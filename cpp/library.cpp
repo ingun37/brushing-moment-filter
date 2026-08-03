@@ -61,13 +61,16 @@ struct SwsGuard {
 };
 
 // Decodes the video at `path` and passes each sampled BGR frame and its
-// presentation time (seconds) to `sink`. Stops early if `sink` returns false.
+// presentation time (seconds) to `sink`, starting the sampling clock at
+// `startSeconds`. Stops early if `sink` returns false.
 std::expected<void, std::string>
-decodeFrames(const std::string& path, double intervalSeconds,
+decodeFrames(const std::string& path, double intervalSeconds, double startSeconds,
              const std::function<bool(cv::Mat, double)>& sink)
 {
     if (intervalSeconds <= 0)
         return fail("intervalSeconds must be positive");
+    if (startSeconds < 0)
+        return fail("startSeconds must not be negative");
 
     AVFormatContext* fmtRaw = nullptr;
     int err = avformat_open_input(&fmtRaw, path.c_str(), nullptr, nullptr);
@@ -100,7 +103,7 @@ decodeFrames(const std::string& path, double intervalSeconds,
 
     SwsGuard sws;
     bool stopped = false;
-    double nextSampleTime = 0.0;
+    double nextSampleTime = startSeconds;
     const double timeBase = av_q2d(stream->time_base);
 
     auto handleFrame = [&](const AVFrame* f) -> std::expected<void, std::string> {
@@ -152,10 +155,10 @@ decodeFrames(const std::string& path, double intervalSeconds,
 } // namespace
 
 std::expected<std::vector<cv::Mat>, std::string>
-extractFrames(const std::string& path, double intervalSeconds)
+extractFrames(const std::string& path, double intervalSeconds, double startSeconds)
 {
     std::vector<cv::Mat> result;
-    auto ok = decodeFrames(path, intervalSeconds, [&](cv::Mat frame, double) {
+    auto ok = decodeFrames(path, intervalSeconds, startSeconds, [&](cv::Mat frame, double) {
         result.push_back(std::move(frame));
         return true;
     });
@@ -165,14 +168,15 @@ extractFrames(const std::string& path, double intervalSeconds)
 }
 
 std::expected<void, std::string>
-extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue& queue)
+extractFramesToQueue(const std::string& path, double intervalSeconds, FrameQueue& queue,
+                     double startSeconds)
 {
     struct CloseGuard {
         FrameQueue& q;
         ~CloseGuard() { q.close(); }
     } closeGuard{queue};
 
-    return decodeFrames(path, intervalSeconds, [&](cv::Mat frame, double t) {
+    return decodeFrames(path, intervalSeconds, startSeconds, [&](cv::Mat frame, double t) {
         return queue.push({std::move(frame), t});
     });
 }

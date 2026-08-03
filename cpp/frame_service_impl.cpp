@@ -81,7 +81,12 @@ bool timedRead(Stream& stream, IdleWatchdog& watchdog,
     return ok;
 }
 
-std::expected<std::filesystem::path, std::string>
+struct ReceivedVideo {
+    std::filesystem::path path;
+    double startSeconds = 0.0; // from the first chunk; where sampling resumes
+};
+
+std::expected<ReceivedVideo, std::string>
 receiveVideo(Stream& stream, IdleWatchdog& watchdog)
 {
     const auto path =
@@ -94,12 +99,20 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
         return std::unexpected("failed to open temp file " + path.string());
 
     frameservice::ClientMessage message;
+    double startSeconds = 0.0;
+    bool first = true;
     while (true) {
         if (!timedRead(stream, watchdog, message))
             return std::unexpected("client went away mid-upload");
         if (!message.has_chunk())
             return std::unexpected("expected a VideoChunk during upload");
         const auto& chunk = message.chunk();
+        if (first) {
+            if (chunk.start_seconds() < 0)
+                return std::unexpected("start_seconds must not be negative");
+            startSeconds = chunk.start_seconds();
+            first = false;
+        }
         out.write(chunk.data().data(),
                   static_cast<std::streamsize>(chunk.data().size()));
         if (chunk.last())
@@ -107,7 +120,7 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
     }
     if (!out.flush())
         return std::unexpected("failed to write temp file " + path.string());
-    return path;
+    return ReceivedVideo{path, startSeconds};
 }
 
 // Pops up to `count` frames and sends them as one Frames batch. Returns the
@@ -149,8 +162,8 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
 
     std::expected<void, std::string> extracted;
     std::jthread extractThread([&] {
-        extracted =
-            extractFramesToQueue(video->string(), opts_.intervalSeconds, decoded);
+        extracted = extractFramesToQueue(video->path.string(), opts_.intervalSeconds,
+                                         decoded, video->startSeconds);
     });
     std::jthread dedupThread([&] {
         removeConsecutiveDuplicatesToQueue(decoded, unique, opts_.tolerance);
@@ -195,6 +208,6 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
         std::cerr << "decoding failed: " << extracted.error() << "\n";
 
     std::error_code ec;
-    std::filesystem::remove(*video, ec);
+    std::filesystem::remove(video->path, ec);
     return status;
 }
