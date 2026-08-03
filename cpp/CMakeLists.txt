@@ -30,6 +30,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(googletest)
 
+set(STDEXEC_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(STDEXEC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+        stdexec
+        URL https://github.com/NVIDIA/stdexec/archive/refs/tags/nvhpc-26.05.zip
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_MakeAvailable(stdexec)
+target_link_libraries(brushing_moment_filter PUBLIC STDEXEC::stdexec)
+
 add_executable(ffmpeg_playground_tests tests/library_test.cpp)
 target_link_libraries(ffmpeg_playground_tests PRIVATE brushing_moment_filter GTest::gtest_main)
 target_include_directories(ffmpeg_playground_tests PRIVATE ${CMAKE_SOURCE_DIR})

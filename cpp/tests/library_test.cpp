@@ -1,4 +1,5 @@
 #include "library.h"
+#include "pipeline.h"
 
 #include <gtest/gtest.h>
 #include <opencv2/imgcodecs.hpp>
@@ -210,6 +211,59 @@ TEST(RemoveConsecutiveDuplicatesToQueueTest, ClosingOutputStopsWholePipeline) {
     ASSERT_EQ(dedup.wait_for(std::chrono::seconds(5)), std::future_status::ready);
     ASSERT_EQ(producer.wait_for(std::chrono::seconds(5)), std::future_status::ready);
     EXPECT_TRUE(producer.get().has_value());
+}
+
+TEST(PipelineTest, ExtractUniqueFramesMatchesSynchronousResult) {
+    // stdexec pipeline (decode -> dedup -> collect on a thread pool) must
+    // produce the same A, B, C frames as the synchronous path.
+    const auto result = pipeline::extractUniqueFrames(
+        kResourceDir + "/ABC.mp4", 0.4, 10.0, /*queueCapacity=*/2);
+    ASSERT_TRUE(result.has_value()) << result.error();
+    ASSERT_EQ(result->size(), 3u);
+
+    const char* names[] = {"A.png", "B.png", "C.png"};
+    for (int i = 0; i < 3; ++i) {
+        const cv::Mat letter = cv::imread(kResourceDir + "/" + names[i]);
+        ASSERT_FALSE(letter.empty());
+        EXPECT_LT(meanAbsDiff((*result)[i], letter), 10.0) << names[i];
+    }
+}
+
+TEST(PipelineTest, DecodeErrorPropagatesThroughPipeline) {
+    const auto result =
+        pipeline::extractUniqueFrames(kResourceDir + "/does_not_exist.mp4", 0.4, 10.0);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("does_not_exist"), std::string::npos);
+}
+
+TEST(PipelineTest, CustomFilterStageComposesIntoPipeline) {
+    // Four-stage pipeline with a user-defined filter spliced in between
+    // dedup and collect (the slot a hand-filtering UI stage would occupy):
+    // it rejects frames that look like B, so only A and C come out.
+    const cv::Mat b = cv::imread(kResourceDir + "/B.png");
+    ASSERT_FALSE(b.empty());
+
+    exec::static_thread_pool pool(4);
+    auto scheduler = pool.get_scheduler();
+    FrameQueue decoded(2);
+    FrameQueue unique(2);
+    FrameQueue accepted(2);
+
+    auto [extracted, frames] = stdexec::sync_wait(
+        stdexec::when_all(
+            pipeline::extractStage(scheduler, kResourceDir + "/ABC.mp4", 0.4, decoded),
+            pipeline::dedupStage(scheduler, decoded, unique, 10.0),
+            pipeline::filterStage(scheduler, unique, accepted,
+                                  [&](const cv::Mat& f) { return meanAbsDiff(f, b) > 10.0; }),
+            pipeline::collectStage(scheduler, accepted))).value();
+
+    ASSERT_TRUE(extracted.has_value()) << extracted.error();
+    ASSERT_EQ(frames.size(), 2u);
+    const cv::Mat a = cv::imread(kResourceDir + "/A.png");
+    const cv::Mat c = cv::imread(kResourceDir + "/C.png");
+    ASSERT_FALSE(a.empty() || c.empty());
+    EXPECT_LT(meanAbsDiff(frames[0], a), 10.0);
+    EXPECT_LT(meanAbsDiff(frames[1], c), 10.0);
 }
 
 TEST(ExtractFramesTest, SamplesAbcVideoEveryPointNineSeconds) {
