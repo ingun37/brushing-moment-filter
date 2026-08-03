@@ -36,3 +36,34 @@ ffmpeg -y "${inputs[@]}" \
        -c:v libx264 \
        -pix_fmt yuv420p \
        "${RESOURCE_DIR}/ABC.mp4"
+
+# 12.mp4: flashes numbers 0 through 11, one second each.
+NUMS=({0..11})
+
+for num in "${NUMS[@]}"; do
+  magick -size 64x64 \
+         -background white \
+         -fill black \
+         -font "/System/Library/Fonts/Supplemental/Arial Unicode.ttf" \
+         -gravity center \
+         label:"${num}" \
+         "${RESOURCE_DIR}/${num}.png"
+done
+
+inputs=()
+for num in "${NUMS[@]}"; do
+  inputs+=(-loop 1 -t 1 -framerate 30 -i "${RESOURCE_DIR}/${num}.png")
+done
+
+filter=""
+for (( i = 0; i < ${#NUMS[@]}; i++ )); do
+  filter+="[${i}:v]"
+done
+filter+="concat=n=${#NUMS[@]}:v=1:a=0[v]"
+
+ffmpeg -y "${inputs[@]}" \
+       -filter_complex "${filter}" \
+       -map "[v]" \
+       -c:v libx264 \
+       -pix_fmt yuv420p \
+       "${RESOURCE_DIR}/12.mp4"
