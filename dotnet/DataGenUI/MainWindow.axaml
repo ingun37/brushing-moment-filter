@@ -11,6 +11,10 @@
         <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
             <TextBlock Text="Server:" VerticalAlignment="Center"/>
             <TextBox x:Name="ServerBox" Text="http://localhost:15071" Width="220"/>
+            <TextBlock Text="Interval (s):" VerticalAlignment="Center"/>
+            <TextBox x:Name="IntervalBox" Text="1.0" Width="60"/>
+            <TextBlock Text="Dedup tolerance:" VerticalAlignment="Center"/>
+            <TextBox x:Name="ToleranceBox" Text="5" Width="60"/>
             <Button x:Name="OpenButton" Content="Open Video…" Click="OnOpenVideo"/>
             <Button x:Name="ClearButton" Content="Clear" Click="OnClear"/>
         </StackPanel>

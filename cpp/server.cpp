@@ -2,8 +2,9 @@
 // the wire contract in frame_service.proto.
 //
 // Usage: frame_server --port <port>
-//                     [--sample-interval-seconds <double>]
-//                     [--dedup-tolerance <double>]
+//
+// Pipeline parameters (sampling interval, dedup tolerance) are per-video and
+// arrive on the first VideoChunk of each session.
 
 #include "frame_service_impl.h"
 
@@ -20,12 +21,7 @@ namespace {
 
 void printUsage(const char* program)
 {
-    std::cerr << "usage: " << program
-              << " --port <port>\n"
-                 "          [--sample-interval-seconds <double>]  time between"
-                 " sampled frames (default 1.0)\n"
-                 "          [--dedup-tolerance <double>]          max mean abs"
-                 " pixel diff treated as duplicate (default 10)\n";
+    std::cerr << "usage: " << program << " --port <port>\n";
 }
 
 template <typename T>
@@ -61,18 +57,6 @@ int main(int argc, char** argv)
         bool ok = true;
         if (name == "--port") {
             ok = (port = parseNumber<int>(value)).has_value();
-        } else if (name == "--sample-interval-seconds") {
-            ok = false;
-            if (const auto v = parseNumber<double>(value)) {
-                opts.intervalSeconds = *v;
-                ok = true;
-            }
-        } else if (name == "--dedup-tolerance") {
-            ok = false;
-            if (const auto v = parseNumber<double>(value)) {
-                opts.tolerance = *v;
-                ok = true;
-            }
         } else {
             std::cerr << "unknown argument " << name << "\n";
             printUsage(argv[0]);

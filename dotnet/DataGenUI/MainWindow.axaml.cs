@@ -80,6 +80,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        // Per-video pipeline parameters, sent to the server on the first chunk.
+        if (!double.TryParse(IntervalBox.Text, out var intervalSeconds) || intervalSeconds <= 0)
+        {
+            StatusText.Text = "Interval must be a positive number of seconds.";
+            return;
+        }
+        if (!double.TryParse(ToleranceBox.Text, out var tolerance) || tolerance < 0)
+        {
+            StatusText.Text = "Dedup tolerance must be a non-negative number.";
+            return;
+        }
+
         await EndSessionAsync();
         var videoName = Path.GetFileNameWithoutExtension(path);
         var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
@@ -123,6 +135,8 @@ public partial class MainWindow : Window
                     if (firstChunk)
                     {
                         chunk.StartSeconds = _manifest.ResumeSeconds;
+                        chunk.SampleIntervalSeconds = intervalSeconds;
+                        chunk.DedupTolerance = tolerance;
                         firstChunk = false;
                     }
                     await _call.RequestStream.WriteAsync(new ClientMessage { Chunk = chunk });

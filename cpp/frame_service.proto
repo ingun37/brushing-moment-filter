@@ -29,6 +29,10 @@ message VideoChunk {
   // Sampling starts at this presentation time instead of 0 (for resuming a
   // previous session). Only read from the first chunk of the upload.
   double start_seconds = 3;
+  // Per-video pipeline parameters, only read from the first chunk of the
+  // upload. When unset, the server defaults apply (1.0 s / 10.0).
+  optional double sample_interval_seconds = 4; // time between sampled frames
+  optional double dedup_tolerance = 5; // max mean abs pixel diff treated as duplicate
 }
 
 message Next {

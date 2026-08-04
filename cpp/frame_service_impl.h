@@ -7,13 +7,12 @@
 #include <cstddef>
 
 struct FrameServerOptions {
-    double intervalSeconds = 1.0; // time between sampled frames
-    double tolerance = 10.0;
     std::chrono::seconds timeout{300}; // paced by human clicks: be generous
 };
 
 // Implements the FrameService contract (see frame_service.proto): receives
-// the uploaded video, pipelines it through extractFramesToQueue ->
+// the uploaded video (whose first chunk carries the per-video sampling
+// interval and dedup tolerance), pipelines it through extractFramesToQueue ->
 // removeConsecutiveDuplicatesToQueue, sends the first frame, then one frame
 // per Next request until EndOfFile or Stop. A session with no client message
 // for `timeout` is cancelled.

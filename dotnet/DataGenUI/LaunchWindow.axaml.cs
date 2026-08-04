@@ -12,9 +12,9 @@ namespace DataGenUI;
 
 public partial class LaunchWindow : Window
 {
-    // Defaults match run.py / dotnet/AGENTS.md.
-    private const string DefaultServerArgs =
-        "--port 15071 --sample-interval-seconds 1.0 --dedup-tolerance 5";
+    // Pipeline parameters (sampling interval, dedup tolerance) are chosen
+    // per video in the main window; the server only needs a port.
+    private const string DefaultServerArgs = "--port 15071";
 
     public LaunchWindow()
     {

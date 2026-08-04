@@ -83,7 +83,10 @@ bool timedRead(Stream& stream, IdleWatchdog& watchdog,
 
 struct ReceivedVideo {
     std::filesystem::path path;
-    double startSeconds = 0.0; // from the first chunk; where sampling resumes
+    // Per-video parameters, all from the first chunk.
+    double startSeconds = 0.0; // where sampling resumes
+    double intervalSeconds = 1.0; // time between sampled frames
+    double tolerance = 10.0; // max mean abs pixel diff treated as duplicate
 };
 
 std::expected<ReceivedVideo, std::string>
@@ -99,7 +102,7 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
         return std::unexpected("failed to open temp file " + path.string());
 
     frameservice::ClientMessage message;
-    double startSeconds = 0.0;
+    ReceivedVideo video{path};
     bool first = true;
     while (true) {
         if (!timedRead(stream, watchdog, message))
@@ -110,7 +113,17 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
         if (first) {
             if (chunk.start_seconds() < 0)
                 return std::unexpected("start_seconds must not be negative");
-            startSeconds = chunk.start_seconds();
+            video.startSeconds = chunk.start_seconds();
+            if (chunk.has_sample_interval_seconds()) {
+                if (chunk.sample_interval_seconds() <= 0)
+                    return std::unexpected("sample_interval_seconds must be positive");
+                video.intervalSeconds = chunk.sample_interval_seconds();
+            }
+            if (chunk.has_dedup_tolerance()) {
+                if (chunk.dedup_tolerance() < 0)
+                    return std::unexpected("dedup_tolerance must not be negative");
+                video.tolerance = chunk.dedup_tolerance();
+            }
             first = false;
         }
         out.write(chunk.data().data(),
@@ -120,7 +133,7 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
     }
     if (!out.flush())
         return std::unexpected("failed to write temp file " + path.string());
-    return ReceivedVideo{path, startSeconds};
+    return video;
 }
 
 // Pops up to `count` frames and sends them as one Frames batch. Returns the
@@ -162,11 +175,11 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
 
     std::expected<void, std::string> extracted;
     std::jthread extractThread([&] {
-        extracted = extractFramesToQueue(video->path.string(), opts_.intervalSeconds,
+        extracted = extractFramesToQueue(video->path.string(), video->intervalSeconds,
                                          decoded, video->startSeconds);
     });
     std::jthread dedupThread([&] {
-        removeConsecutiveDuplicatesToQueue(decoded, unique, opts_.tolerance);
+        removeConsecutiveDuplicatesToQueue(decoded, unique, video->tolerance);
     });
 
     grpc::Status status = grpc::Status::OK;

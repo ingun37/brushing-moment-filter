@@ -44,17 +44,27 @@ private:
 using Stream = grpc::ClientReaderWriter<frameservice::ClientMessage,
                                         frameservice::ServerMessage>;
 
-// Streams the file as VideoChunks, the final one flagged `last`.
-void upload(Stream& stream, const std::string& path) {
+// Streams the file as VideoChunks, the final one flagged `last`. The first
+// chunk carries the per-video pipeline parameters: interval 0.001 decodes
+// every frame, tolerance 5 keeps adjacent digits of 12.mp4 distinct (they
+// differ by as little as ~7.3).
+void upload(Stream& stream, const std::string& path,
+            double intervalSeconds = 0.001, double tolerance = 5.0) {
     std::ifstream in(path, std::ios::binary);
     ASSERT_TRUE(in) << path;
     std::vector<char> buf(1 << 16);
     frameservice::ClientMessage message;
+    bool first = true;
     while (in.read(buf.data(), static_cast<std::streamsize>(buf.size())),
            in.gcount() > 0) {
         message.mutable_chunk()->set_data(buf.data(),
                                           static_cast<std::size_t>(in.gcount()));
         message.mutable_chunk()->set_last(in.peek() == EOF);
+        if (first) {
+            message.mutable_chunk()->set_sample_interval_seconds(intervalSeconds);
+            message.mutable_chunk()->set_dedup_tolerance(tolerance);
+            first = false;
+        }
         ASSERT_TRUE(stream.Write(message));
     }
 }
@@ -71,17 +81,10 @@ cv::Mat decodePng(const std::string& png) {
     return cv::imdecode(bytes, cv::IMREAD_COLOR);
 }
 
-FrameServerOptions countingVideoOptions() {
-    FrameServerOptions opts;
-    opts.intervalSeconds = 0.001; // decode every frame
-    opts.tolerance = 5.0; // adjacent digits differ by as little as ~7.3
-    return opts;
-}
-
 } // namespace
 
 TEST(FrameServiceTest, FullSessionYieldsOneFramePerNumberThenEof) {
-    TestServer server(countingVideoOptions());
+    TestServer server({});
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
@@ -111,7 +114,7 @@ TEST(FrameServiceTest, FullSessionYieldsOneFramePerNumberThenEof) {
 }
 
 TEST(FrameServiceTest, NextCountBatchesFramesPerResponse) {
-    TestServer server(countingVideoOptions());
+    TestServer server({});
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
@@ -146,7 +149,7 @@ TEST(FrameServiceTest, NextCountBatchesFramesPerResponse) {
 }
 
 TEST(FrameServiceTest, StopTerminatesSessionEarly) {
-    TestServer server(countingVideoOptions());
+    TestServer server({});
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
     upload(*stream, kResourceDir + "/12.mp4");
@@ -166,7 +169,7 @@ TEST(FrameServiceTest, StopTerminatesSessionEarly) {
 }
 
 TEST(FrameServiceTest, SilentClientIsCancelledAfterIdleTimeout) {
-    auto opts = countingVideoOptions();
+    FrameServerOptions opts;
     opts.timeout = std::chrono::seconds(1);
     TestServer server(opts);
     grpc::ClientContext ctx;
@@ -188,7 +191,7 @@ TEST(FrameServiceTest, SilentClientIsCancelledAfterIdleTimeout) {
 }
 
 TEST(FrameServiceTest, NonChunkMessageDuringUploadIsRejected) {
-    TestServer server(countingVideoOptions());
+    TestServer server({});
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
 
@@ -203,7 +206,7 @@ TEST(FrameServiceTest, NonChunkMessageDuringUploadIsRejected) {
 }
 
 TEST(FrameServiceTest, UndecodableVideoReportsError) {
-    TestServer server(countingVideoOptions());
+    TestServer server({});
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
 

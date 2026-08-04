@@ -17,11 +17,13 @@ video and fetches the next batch, Skip All just fetches the next batch, Stop end
   order: (1) `--server-path <path>` CLI argument (e.g. `dotnet run -- --server-path
   ../../cpp/build/frame_server`), (2) a `frame_server` file next to the app executable
   (`AppContext.BaseDirectory`), (3) a file picker. The resolved path and the server arguments
-  (default `--port 15071 --sample-interval-seconds 1.0 --dedup-tolerance 5`, matching
-  `run.py`) are shown in editable fields; Next validates the path, starts the process, waits
+  (default `--port 15071`) are shown in editable fields; Next validates the path, starts the process, waits
   1 s to catch an immediate exit (bad flags, port in use — shown in the status line, retry
   allowed), then opens the main view. The `Process` handle lives in `App.ServerProcess`;
   `App.axaml.cs` kills it on `desktop.Exit`.
+- Pipeline parameters are per-video, not server flags: the main window has editable
+  Interval (s) / Dedup tolerance fields (defaults 1.0 / 5), validated on Open Video… and
+  sent on the first `VideoChunk` of the upload.
 - No MVVM: the template is plain code-behind (`MainWindow.axaml.cs` holds the gRPC session
   state). Fine at this size; introduce a view model only if the UI grows.
 - The gRPC session is strict ping-pong after upload: every batch, including the first, is
