@@ -34,6 +34,13 @@ std::vector<cv::Mat> removeConsecutiveDuplicates(R&& frames, double tolerance)
     return result;
 }
 
+// Returns the MD5 of the video stream's compressed packet data as a
+// lowercase hex string (equivalent to `ffmpeg -i path -map 0:v -c copy
+// -f md5 -`): container metadata is ignored, so remuxed copies of the
+// same encoded stream hash equal, but re-encodes do not. No decoding
+// is performed. On I/O failure, returns an error message.
+std::expected<std::string, std::string> videoStreamMd5(const std::string& path);
+
 // Decodes the video at `path` and returns one BGR frame for each sampling
 // point t = start, start + interval, start + 2*interval, ... within the
 // video's duration. On I/O or decoding failure, returns an error message.

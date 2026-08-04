@@ -5,6 +5,7 @@
 #include <opencv2/imgcodecs.hpp>
 
 #include <chrono>
+#include <filesystem>
 #include <future>
 #include <list>
 #include <string>
@@ -72,6 +73,42 @@ TEST(RemoveConsecutiveDuplicatesTest, DeduplicatesExtractedAbcFrames) {
         ASSERT_FALSE(letter.empty());
         EXPECT_LT(meanAbsDiff(unique[i], letter), 10.0) << names[i];
     }
+}
+
+TEST(VideoStreamMd5Test, IsDeterministicAndDistinguishesVideos) {
+    const auto abc = videoStreamMd5(kResourceDir + "/ABC.mp4");
+    ASSERT_TRUE(abc.has_value()) << abc.error();
+
+    // 32 lowercase hex digits.
+    EXPECT_EQ(abc->size(), 32u);
+    EXPECT_EQ(abc->find_first_not_of("0123456789abcdef"), std::string::npos);
+
+    // Same file, same hash; different video, different hash.
+    EXPECT_EQ(*abc, *videoStreamMd5(kResourceDir + "/ABC.mp4"));
+    const auto twelve = videoStreamMd5(kResourceDir + "/12.mp4");
+    ASSERT_TRUE(twelve.has_value()) << twelve.error();
+    EXPECT_NE(*abc, *twelve);
+}
+
+TEST(VideoStreamMd5Test, ByteIdenticalCopyHashesEqual) {
+    const auto copyPath =
+        std::filesystem::temp_directory_path() / "video_stream_md5_copy.mp4";
+    std::filesystem::copy_file(kResourceDir + "/ABC.mp4", copyPath,
+                               std::filesystem::copy_options::overwrite_existing);
+
+    const auto original = videoStreamMd5(kResourceDir + "/ABC.mp4");
+    const auto copy = videoStreamMd5(copyPath.string());
+    std::filesystem::remove(copyPath);
+
+    ASSERT_TRUE(original.has_value()) << original.error();
+    ASSERT_TRUE(copy.has_value()) << copy.error();
+    EXPECT_EQ(*original, *copy);
+}
+
+TEST(VideoStreamMd5Test, FailsForMissingFile) {
+    const auto result = videoStreamMd5(kResourceDir + "/does_not_exist.mp4");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("does_not_exist"), std::string::npos);
 }
 
 TEST(ExtractFramesToQueueTest, ProducerPausesOnFullQueueAndDeliversAllFrames) {

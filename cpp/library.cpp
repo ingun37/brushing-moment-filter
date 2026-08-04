@@ -6,6 +6,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/md5.h>
 #include <libswscale/swscale.h>
 }
 
@@ -153,6 +154,47 @@ decodeFrames(const std::string& path, double intervalSeconds, double startSecond
 }
 
 } // namespace
+
+std::expected<std::string, std::string> videoStreamMd5(const std::string& path)
+{
+    AVFormatContext* fmtRaw = nullptr;
+    int err = avformat_open_input(&fmtRaw, path.c_str(), nullptr, nullptr);
+    if (err < 0)
+        return fail("avformat_open_input failed for " + path, err);
+    std::unique_ptr<AVFormatContext, decltype([](AVFormatContext* p) { avformat_close_input(&p); })> fmt(fmtRaw);
+
+    if ((err = avformat_find_stream_info(fmt.get(), nullptr)) < 0)
+        return fail("avformat_find_stream_info failed", err);
+
+    const int streamIndex = av_find_best_stream(fmt.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    if (streamIndex < 0)
+        return fail("no video stream found in " + path, streamIndex);
+
+    std::unique_ptr<AVPacket, decltype([](AVPacket* p) { av_packet_free(&p); })> packet(av_packet_alloc());
+    std::unique_ptr<AVMD5, decltype([](AVMD5* p) { av_free(p); })> md5(av_md5_alloc());
+    if (!packet || !md5)
+        return fail("allocation failed");
+    av_md5_init(md5.get());
+
+    while ((err = av_read_frame(fmt.get(), packet.get())) >= 0) {
+        if (packet->stream_index == streamIndex)
+            av_md5_update(md5.get(), packet->data, packet->size);
+        av_packet_unref(packet.get());
+    }
+    if (err != AVERROR_EOF)
+        return fail("av_read_frame failed", err);
+
+    uint8_t digest[16];
+    av_md5_final(md5.get(), digest);
+
+    std::string hex(32, '\0');
+    static constexpr char kHexDigits[] = "0123456789abcdef";
+    for (int i = 0; i < 16; ++i) {
+        hex[2 * i] = kHexDigits[digest[i] >> 4];
+        hex[2 * i + 1] = kHexDigits[digest[i] & 0xf];
+    }
+    return hex;
+}
 
 std::expected<std::vector<cv::Mat>, std::string>
 extractFrames(const std::string& path, double intervalSeconds, double startSeconds)
