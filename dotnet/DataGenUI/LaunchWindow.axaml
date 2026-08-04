@@ -2,12 +2,31 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="DataGenUI.LaunchWindow"
         Title="Frame Review"
-        Width="400" Height="200"
+        Width="520" Height="260"
         CanResize="False"
         WindowStartupLocation="CenterScreen">
-    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
+    <StackPanel Margin="20" Spacing="12">
         <TextBlock Text="Frame Review" FontSize="24" HorizontalAlignment="Center"/>
-        <ProgressBar IsIndeterminate="True" Width="240"/>
-        <TextBlock x:Name="LaunchStatusText" Text="Initializing…" HorizontalAlignment="Center"/>
+
+        <StackPanel Spacing="4">
+            <TextBlock Text="Server executable:"/>
+            <DockPanel>
+                <Button x:Name="BrowseButton" DockPanel.Dock="Right" Content="Browse…"
+                        Margin="8,0,0,0" Click="OnBrowse"/>
+                <TextBox x:Name="ServerPathBox" PlaceholderText="Path to frame_server"/>
+            </DockPanel>
+        </StackPanel>
+
+        <StackPanel Spacing="4">
+            <TextBlock Text="Server arguments:"/>
+            <TextBox x:Name="ServerArgsBox"/>
+        </StackPanel>
+
+        <DockPanel>
+            <Button x:Name="NextButton" DockPanel.Dock="Right" Content="Next"
+                    MinWidth="100" Click="OnNext"/>
+            <TextBlock x:Name="LaunchStatusText" Text="" VerticalAlignment="Center"
+                       TextWrapping="Wrap"/>
+        </DockPanel>
     </StackPanel>
 </Window>

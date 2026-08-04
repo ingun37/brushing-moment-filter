@@ -26,6 +26,8 @@
             </StackPanel>
             <TextBlock x:Name="StatusText" Text="Open a video to start a session."
                        HorizontalAlignment="Center"/>
+            <TextBlock x:Name="ProgressText" Text="" HorizontalAlignment="Center"
+                       Foreground="Gray"/>
         </StackPanel>
 
         <Border BorderBrush="Gray" BorderThickness="1" Margin="0,12">

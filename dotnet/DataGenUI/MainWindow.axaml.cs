@@ -33,6 +33,35 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        UpdateProgress();
+    }
+
+    // Aggregates every session manifest under DataGenUI_data/sessions (the
+    // current video's counts come from the in-memory manifest, which is ahead
+    // of disk mid-batch) and shows the overall collection progress.
+    private void UpdateProgress()
+    {
+        var positive = 0;
+        var negative = 0;
+        var videos = 0;
+        var sessionsDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data", "sessions");
+        if (Directory.Exists(sessionsDir))
+        {
+            foreach (var file in Directory.EnumerateFiles(sessionsDir, "*.json"))
+            {
+                var manifest = file == _manifestPath && _manifest is not null
+                    ? _manifest
+                    : SessionManifest.LoadOrCreate(file, "");
+                if (manifest.Frames.Count == 0)
+                    continue;
+                videos++;
+                positive += manifest.Frames.Count(f => f.Positive);
+                negative += manifest.Frames.Count(f => !f.Positive);
+            }
+        }
+        ProgressText.Text = videos == 0
+            ? "No data collected yet."
+            : $"Collected {positive} positive / {negative} negative frame(s) from {videos} video(s).";
     }
 
     private async void OnOpenVideo(object? sender, RoutedEventArgs e)
@@ -165,6 +194,7 @@ public partial class MainWindow : Window
             _manifest!.ResumeSeconds = _batchTimestamps[^1] + 0.001;
             _manifest.Save(_manifestPath);
         }
+        UpdateProgress();
     }
 
     // Ends any active session and deletes everything under DataGenUI_data:
@@ -191,6 +221,7 @@ public partial class MainWindow : Window
         _positiveCount = 0;
         FrameList.Items.Clear();
         StatusText.Text = "Cleared all saved frames and session state. Open a video to start.";
+        UpdateProgress();
     }
 
     private async void OnStop(object? sender, RoutedEventArgs e)
