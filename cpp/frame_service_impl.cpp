@@ -84,7 +84,6 @@ bool timedRead(Stream& stream, IdleWatchdog& watchdog,
 struct ReceivedVideo {
     std::filesystem::path path;
     // Per-video parameters, all from the first chunk.
-    double startSeconds = 0.0; // where sampling resumes
     double intervalSeconds = 1.0; // time between sampled frames
     double tolerance = 10.0; // max mean abs pixel diff treated as duplicate
 };
@@ -111,9 +110,6 @@ receiveVideo(Stream& stream, IdleWatchdog& watchdog)
             return std::unexpected("expected a VideoChunk during upload");
         const auto& chunk = message.chunk();
         if (first) {
-            if (chunk.start_seconds() < 0)
-                return std::unexpected("start_seconds must not be negative");
-            video.startSeconds = chunk.start_seconds();
             if (chunk.has_sample_interval_seconds()) {
                 if (chunk.sample_interval_seconds() <= 0)
                     return std::unexpected("sample_interval_seconds must be positive");
@@ -169,6 +165,38 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
         std::cerr << video.error() << "\n";
         return {grpc::StatusCode::INVALID_ARGUMENT, video.error()};
     }
+    // Remove the temp file on every exit path below.
+    struct TempFileGuard {
+        const std::filesystem::path& path;
+        ~TempFileGuard()
+        {
+            std::error_code ec;
+            std::filesystem::remove(path, ec);
+        }
+    } tempFileGuard{video->path};
+
+    // Identify the video to the client, then wait for Start: the client keys
+    // its resume position off the MD5, so it cannot pick start_seconds until
+    // it has seen VideoInfo.
+    const auto md5 = videoStreamMd5(video->path.string());
+    if (!md5) {
+        std::cerr << md5.error() << "\n";
+        return {grpc::StatusCode::INVALID_ARGUMENT, "hashing failed: " + md5.error()};
+    }
+    {
+        frameservice::ServerMessage message;
+        message.mutable_info()->set_video_md5(*md5);
+        if (!stream->Write(message))
+            return grpc::Status::OK; // client went away
+    }
+    frameservice::ClientMessage startRequest;
+    if (!timedRead(*stream, watchdog, startRequest) || startRequest.has_stop())
+        return grpc::Status::OK; // stop, timeout, or disconnect
+    if (!startRequest.has_start())
+        return {grpc::StatusCode::INVALID_ARGUMENT, "expected Start or Stop after VideoInfo"};
+    if (startRequest.start().start_seconds() < 0)
+        return {grpc::StatusCode::INVALID_ARGUMENT, "start_seconds must not be negative"};
+    const double startSeconds = startRequest.start().start_seconds();
 
     FrameQueue decoded(4);
     FrameQueue unique(4);
@@ -176,7 +204,7 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
     std::expected<void, std::string> extracted;
     std::jthread extractThread([&] {
         extracted = extractFramesToQueue(video->path.string(), video->intervalSeconds,
-                                         decoded, video->startSeconds);
+                                         decoded, startSeconds);
     });
     std::jthread dedupThread([&] {
         removeConsecutiveDuplicatesToQueue(decoded, unique, video->tolerance);
@@ -219,8 +247,5 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
     extractThread.join();
     if (!extracted)
         std::cerr << "decoding failed: " << extracted.error() << "\n";
-
-    std::error_code ec;
-    std::filesystem::remove(video->path, ec);
     return status;
 }

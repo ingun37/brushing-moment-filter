@@ -1,5 +1,7 @@
 #include "frame_service_impl.h"
 
+#include "library.h"
+
 #include <grpcpp/grpcpp.h>
 #include <gtest/gtest.h>
 #include <opencv2/imgcodecs.hpp>
@@ -47,9 +49,12 @@ using Stream = grpc::ClientReaderWriter<frameservice::ClientMessage,
 // Streams the file as VideoChunks, the final one flagged `last`. The first
 // chunk carries the per-video pipeline parameters: interval 0.001 decodes
 // every frame, tolerance 5 keeps adjacent digits of 12.mp4 distinct (they
-// differ by as little as ~7.3).
+// differ by as little as ~7.3). Then completes the handshake: reads the
+// VideoInfo reply, checks its MD5 against videoStreamMd5 of the source file,
+// and sends Start.
 void upload(Stream& stream, const std::string& path,
-            double intervalSeconds = 0.001, double tolerance = 5.0) {
+            double intervalSeconds = 0.001, double tolerance = 5.0,
+            double startSeconds = 0.0) {
     std::ifstream in(path, std::ios::binary);
     ASSERT_TRUE(in) << path;
     std::vector<char> buf(1 << 16);
@@ -67,6 +72,17 @@ void upload(Stream& stream, const std::string& path,
         }
         ASSERT_TRUE(stream.Write(message));
     }
+
+    frameservice::ServerMessage info;
+    ASSERT_TRUE(stream.Read(&info));
+    ASSERT_TRUE(info.has_info());
+    const auto expected = videoStreamMd5(path);
+    ASSERT_TRUE(expected) << expected.error();
+    EXPECT_EQ(info.info().video_md5(), *expected);
+
+    frameservice::ClientMessage start;
+    start.mutable_start()->set_start_seconds(startSeconds);
+    ASSERT_TRUE(stream.Write(start));
 }
 
 void requestNext(Stream& stream, std::uint32_t count = 1) {
@@ -210,16 +226,16 @@ TEST(FrameServiceTest, UndecodableVideoReportsError) {
     grpc::ClientContext ctx;
     auto stream = server.stub().Session(&ctx);
 
+    // An unparseable upload fails at the hashing step, before any VideoInfo.
     frameservice::ClientMessage message;
     message.mutable_chunk()->set_data("this is not an mp4 file");
     message.mutable_chunk()->set_last(true);
     ASSERT_TRUE(stream->Write(message));
-    requestNext(*stream); // the decode error is reported in reply to a Next
     stream->WritesDone();
 
     frameservice::ServerMessage response;
-    EXPECT_FALSE(stream->Read(&response)); // no frames, no eof
+    EXPECT_FALSE(stream->Read(&response)); // no info, no frames, no eof
     const auto status = stream->Finish();
     EXPECT_EQ(status.error_code(), grpc::StatusCode::INVALID_ARGUMENT);
-    EXPECT_NE(status.error_message().find("decoding failed"), std::string::npos);
+    EXPECT_NE(status.error_message().find("hashing failed"), std::string::npos);
 }

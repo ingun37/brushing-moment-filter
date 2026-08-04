@@ -14,10 +14,13 @@ public class FrameRecord
 }
 
 // Per-video review progress, persisted as JSON under DataGenUI_data/sessions/
-// so a quit session can resume where it left off (ResumeSeconds is sent to
-// the server as VideoChunk.start_seconds).
+// keyed by the video's stream MD5 (from the server's VideoInfo), so a quit
+// session can resume where it left off (ResumeSeconds is sent to the server
+// as Start.start_seconds) even if the file was renamed or moved.
 public class SessionManifest
 {
+    // Last known location of the video; informational only — the MD5 in the
+    // manifest's file name is the identity.
     public string VideoPath { get; set; } = "";
     public double ResumeSeconds { get; set; }
     public List<FrameRecord> Frames { get; set; } = [];

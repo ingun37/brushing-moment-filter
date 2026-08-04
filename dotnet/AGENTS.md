@@ -26,6 +26,10 @@ video and fetches the next batch, Skip All just fetches the next batch, Stop end
   sent on the first `VideoChunk` of the upload.
 - No MVVM: the template is plain code-behind (`MainWindow.axaml.cs` holds the gRPC session
   state). Fine at this size; introduce a view model only if the UI grows.
-- The gRPC session is strict ping-pong after upload: every batch, including the first, is
-  sent in reply to a `Next` (up to `Next.count` frames); this client always asks for 12.
-  Buttons are disabled while a batch is in flight.
+- Session handshake: upload → server replies `VideoInfo` with the video's stream MD5 →
+  client sends `Start` with the resume position. All per-video state (manifest under
+  `DataGenUI_data/sessions/<md5>.json`, saved frames under `positive/<md5>` and
+  `negative/<md5>`) is keyed by that MD5, not the file name, so renamed/moved copies of a
+  video share one session. After `Start` the stream is strict ping-pong: every batch,
+  including the first, is sent in reply to a `Next` (up to `Next.count` frames); this client
+  always asks for 12. Buttons are disabled while a batch is in flight.

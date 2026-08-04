@@ -93,15 +93,7 @@ public partial class MainWindow : Window
         }
 
         await EndSessionAsync();
-        var videoName = Path.GetFileNameWithoutExtension(path);
-        var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
-        _positiveDir = Path.Combine(dataDir, "positive", videoName);
-        _negativeDir = Path.Combine(dataDir, "negative", videoName);
-        _manifestPath = Path.Combine(dataDir, "sessions", videoName + ".json");
-        _manifest = SessionManifest.LoadOrCreate(_manifestPath, path);
-        var resuming = _manifest.ResumeSeconds > 0;
         _frameIndex = 0;
-        _positiveCount = _manifest.Frames.Count(f => f.Positive);
         _eofReceived = false;
         _batchPngs.Clear();
         _batchTimestamps.Clear();
@@ -110,9 +102,7 @@ public partial class MainWindow : Window
         try
         {
             OpenButton.IsEnabled = false;
-            StatusText.Text = resuming
-                ? $"Uploading… (resuming from {_manifest.ResumeSeconds:F1} s)"
-                : "Uploading…";
+            StatusText.Text = "Uploading…";
             // A 12-frame PNG batch easily exceeds the 4 MB default limit.
             _channel = GrpcChannel.ForAddress(ServerBox.Text ?? "", new GrpcChannelOptions
             {
@@ -134,7 +124,6 @@ public partial class MainWindow : Window
                     };
                     if (firstChunk)
                     {
-                        chunk.StartSeconds = _manifest.ResumeSeconds;
                         chunk.SampleIntervalSeconds = intervalSeconds;
                         chunk.DedupTolerance = tolerance;
                         firstChunk = false;
@@ -143,7 +132,26 @@ public partial class MainWindow : Window
                 }
             }
 
-            StatusText.Text = "Waiting for frames…";
+            // The server identifies the uploaded video by its stream MD5;
+            // all session state (manifest, saved frames) is keyed by it, so
+            // renamed or moved copies of a video share one session.
+            var videoMd5 = await ReadVideoInfoAsync();
+            var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
+            _positiveDir = Path.Combine(dataDir, "positive", videoMd5);
+            _negativeDir = Path.Combine(dataDir, "negative", videoMd5);
+            _manifestPath = Path.Combine(dataDir, "sessions", videoMd5 + ".json");
+            _manifest = SessionManifest.LoadOrCreate(_manifestPath, path);
+            _manifest.VideoPath = path; // keep the latest known location
+            _positiveCount = _manifest.Frames.Count(f => f.Positive);
+            var resuming = _manifest.ResumeSeconds > 0;
+
+            StatusText.Text = resuming
+                ? $"Waiting for frames… (resuming from {_manifest.ResumeSeconds:F1} s)"
+                : "Waiting for frames…";
+            await _call.RequestStream.WriteAsync(new ClientMessage
+            {
+                Start = new Start { StartSeconds = _manifest.ResumeSeconds },
+            });
             await _call.RequestStream.WriteAsync(new ClientMessage
             {
                 Next = new Next { Count = BatchSize },
@@ -286,6 +294,18 @@ public partial class MainWindow : Window
             StatusText.Text = $"Session failed: {ex.Message}";
             await EndSessionAsync();
         }
+    }
+
+    // Reads the VideoInfo the server sends once the upload completes and
+    // returns the video's stream MD5.
+    private async Task<string> ReadVideoInfoAsync()
+    {
+        if (!await _call!.ResponseStream.MoveNext(default))
+            throw new RpcException(new Status(StatusCode.Unavailable, "stream ended"));
+        var message = _call.ResponseStream.Current;
+        if (message.MsgCase != ServerMessage.MsgOneofCase.Info)
+            throw new RpcException(new Status(StatusCode.Internal, "expected VideoInfo"));
+        return message.Info.VideoMd5;
     }
 
     // Reads one server message, appending its frames to the current batch or

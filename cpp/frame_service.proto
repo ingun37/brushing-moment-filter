@@ -3,14 +3,17 @@ syntax = "proto3";
 package frameservice;
 
 // Interactive frame extraction. The client opens one Session stream per
-// video: it uploads the mp4 as VideoChunks, then the server pipelines it
-// through decode -> dedup -> downsample. Each Frames batch is sent in
-// response to a Next request (including the first) and holds up to `count`
-// frames; a batch shorter than `count` means the pipeline drained mid-batch,
-// and the response to a Next once it is empty is EndOfFile. The session ends
-// with EndOfFile, a Stop request, stream cancellation, or the server-side
-// idle timeout. There is no explicit heartbeat: gRPC keepalive covers
-// connection liveness, and waiting longer is just not sending Next yet.
+// video: it uploads the mp4 as VideoChunks, the server replies with a
+// VideoInfo identifying the video (stream MD5), and the client then sends
+// Start to launch the pipeline (decode -> dedup -> downsample). Start comes
+// after VideoInfo so the client can key its resume position off the MD5.
+// Each Frames batch is sent in response to a Next request (including the
+// first) and holds up to `count` frames; a batch shorter than `count` means
+// the pipeline drained mid-batch, and the response to a Next once it is
+// empty is EndOfFile. The session ends with EndOfFile, a Stop request,
+// stream cancellation, or the server-side idle timeout. There is no explicit
+// heartbeat: gRPC keepalive covers connection liveness, and waiting longer
+// is just not sending Next yet.
 service FrameService {
   rpc Session(stream ClientMessage) returns (stream ServerMessage);
 }
@@ -20,19 +23,24 @@ message ClientMessage {
     VideoChunk chunk = 1; // upload, in order; `last` marks the final chunk
     Next next = 2;        // send the next batch of frames
     Stop stop = 3;        // terminate the session
+    Start start = 4;      // launch the pipeline; expected right after VideoInfo
   }
 }
 
 message VideoChunk {
   bytes data = 1;
   bool last = 2;
-  // Sampling starts at this presentation time instead of 0 (for resuming a
-  // previous session). Only read from the first chunk of the upload.
-  double start_seconds = 3;
+  reserved 3; // was start_seconds, now on Start
   // Per-video pipeline parameters, only read from the first chunk of the
   // upload. When unset, the server defaults apply (1.0 s / 10.0).
   optional double sample_interval_seconds = 4; // time between sampled frames
   optional double dedup_tolerance = 5; // max mean abs pixel diff treated as duplicate
+}
+
+message Start {
+  // Sampling starts at this presentation time instead of 0 (for resuming a
+  // previous session).
+  double start_seconds = 1;
 }
 
 message Next {
@@ -44,7 +52,15 @@ message ServerMessage {
   oneof msg {
     Frames frames = 1;    // a batch of extracted frames
     EndOfFile eof = 2;    // pipeline drained; session terminates
+    VideoInfo info = 3;   // sent once, right after the upload completes
   }
+}
+
+message VideoInfo {
+  // MD5 of the video stream's compressed packet data, lowercase hex.
+  // Container metadata is ignored, so remuxed copies hash equal; use this
+  // (not the file name) to identify a video across sessions.
+  string video_md5 = 1;
 }
 
 message Frames {

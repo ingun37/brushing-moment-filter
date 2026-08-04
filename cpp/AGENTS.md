@@ -14,7 +14,9 @@ Use modern standard libraries (ranges, concepts, expected, etc.) whenever possib
   `main()` for the `frame_server` executable. The only flag is the mandatory `--port`
   (`frame_server --port 15071`). Pipeline parameters are per-video: the first `VideoChunk`
   of each session may carry `sample_interval_seconds` and `dedup_tolerance` (server defaults
-  1.0 s / 10.0 when unset). The session idle timeout is not a flag; it defaults to 300 s in
+  1.0 s / 10.0 when unset). After the upload the server replies with `VideoInfo` (the
+  `videoStreamMd5` of the upload — the video's identity) and waits for `Start`, which carries
+  `start_seconds`, before launching the pipeline. The session idle timeout is not a flag; it defaults to 300 s in
   `FrameServerOptions` (tests override it programmatically).
 - `tests/library_test.cpp` + `tests/server_test.cpp` (the latter runs the service on an
   in-process gRPC channel, no ports). Test videos come from `tests/gen-test-resources.sh`.
