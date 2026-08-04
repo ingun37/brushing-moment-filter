@@ -1,0 +1,13 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="DataGenUI.LaunchWindow"
+        Title="Frame Review"
+        Width="400" Height="200"
+        CanResize="False"
+        WindowStartupLocation="CenterScreen">
+    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
+        <TextBlock Text="Frame Review" FontSize="24" HorizontalAlignment="Center"/>
+        <ProgressBar IsIndeterminate="True" Width="240"/>
+        <TextBlock x:Name="LaunchStatusText" Text="Initializing…" HorizontalAlignment="Center"/>
+    </StackPanel>
+</Window>
