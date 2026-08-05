@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
 using Frameservice;
@@ -32,6 +33,9 @@ public partial class MainWindow : Window
     private readonly string _manifestPath;
     private readonly SessionManifest _manifest;
     private int _frameIndex; // index of the first frame of the current batch
+    private bool _dragActive;
+    private bool _dragSelect; // whether the drag selects or deselects
+    private int _dragAnchor;  // batch index where the drag started
     private int _positiveCount;
     private readonly double _durationSeconds;
 
@@ -50,7 +54,53 @@ public partial class MainWindow : Window
         SetVideoPosition(_manifest.ResumeSeconds);
         UpdateProgress();
         Loaded += OnLoaded;
+
+        // Drag selection over the frame tiles: press toggles the tile under
+        // the pointer and dragging sweeps that state across the range between
+        // the anchor and the current tile. Tunnel handlers so the ListBox's
+        // own click toggling doesn't fight the drag.
+        FrameList.AddHandler(PointerPressedEvent, OnFramesPointerPressed, RoutingStrategies.Tunnel);
+        FrameList.AddHandler(PointerMovedEvent, OnFramesPointerMoved, RoutingStrategies.Tunnel);
+        FrameList.AddHandler(PointerReleasedEvent, OnFramesPointerReleased, RoutingStrategies.Tunnel);
     }
+
+    private ListBoxItem? FrameItemUnder(PointerEventArgs e)
+    {
+        foreach (var item in FrameList.Items.OfType<ListBoxItem>())
+        {
+            var p = e.GetPosition(item);
+            if (p.X >= 0 && p.Y >= 0 && p.X < item.Bounds.Width && p.Y < item.Bounds.Height)
+                return item;
+        }
+        return null;
+    }
+
+    private void OnFramesPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (!e.GetCurrentPoint(FrameList).Properties.IsLeftButtonPressed)
+            return;
+        if (FrameItemUnder(e) is not { } item)
+            return;
+        _dragActive = true;
+        _dragSelect = !item.IsSelected;
+        _dragAnchor = (int)item.Tag!;
+        item.IsSelected = _dragSelect;
+        e.Handled = true;
+    }
+
+    private void OnFramesPointerMoved(object? sender, PointerEventArgs e)
+    {
+        if (!_dragActive || FrameItemUnder(e) is not { } item)
+            return;
+        var current = (int)item.Tag!;
+        var (lo, hi) = _dragAnchor <= current ? (_dragAnchor, current) : (current, _dragAnchor);
+        for (var i = lo; i <= hi; i++)
+            ((ListBoxItem)FrameList.Items[i]!).IsSelected = _dragSelect;
+        e.Handled = true;
+    }
+
+    private void OnFramesPointerReleased(object? sender, PointerReleasedEventArgs e)
+        => _dragActive = false;
 
     // Reflects how far into the video the review has progressed.
     private void SetVideoPosition(double seconds)

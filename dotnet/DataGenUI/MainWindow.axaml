@@ -5,7 +5,7 @@
         mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="600"
         x:Class="DataGenUI.MainWindow"
         Title="Frame Review"
-        Width="800" Height="600">
+        Width="1600" Height="800">
     <DockPanel Margin="12">
 
         <StackPanel DockPanel.Dock="Bottom" Spacing="8">

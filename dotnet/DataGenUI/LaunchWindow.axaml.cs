@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
+using System.Text.Json;
 using Avalonia.Platform.Storage;
 
 namespace DataGenUI;
@@ -15,6 +16,39 @@ public partial class LaunchWindow : Window
     // Pipeline parameters (sampling interval, dedup tolerance) are chosen
     // per video in the main window; the server only needs a port.
     private const string DefaultServerArgs = "--port 15071";
+
+    private static readonly string ConfigPath =
+        Path.Combine(AppContext.BaseDirectory, "DataGenUI_data", "launch_config.json");
+
+    private sealed record LaunchConfig(string? ServerPath, string? ServerArgs);
+
+    private static LaunchConfig? LoadConfig()
+    {
+        try
+        {
+            return File.Exists(ConfigPath)
+                ? JsonSerializer.Deserialize<LaunchConfig>(File.ReadAllText(ConfigPath))
+                : null;
+        }
+        catch
+        {
+            return null; // corrupt/unreadable cache is not fatal
+        }
+    }
+
+    private void SaveConfig()
+    {
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(ConfigPath)!);
+            File.WriteAllText(ConfigPath, JsonSerializer.Serialize(
+                new LaunchConfig(ServerPathBox.Text?.Trim(), ServerArgsBox.Text)));
+        }
+        catch
+        {
+            // Caching is best-effort; never block launch on it.
+        }
+    }
 
     public LaunchWindow()
     {
@@ -27,13 +61,24 @@ public partial class LaunchWindow : Window
     {
         Loaded -= OnLoaded;
 
-        // Prefill: --server-path CLI argument, then frame_server next to the app
+        // Prefill: --server-path CLI argument, then the last used configuration
+        // (DataGenUI_data/launch_config.json), then frame_server next to the app
         // executable, then a file picker. The user can still edit before Next.
+        var config = LoadConfig();
+        if (!string.IsNullOrWhiteSpace(config?.ServerArgs))
+            ServerArgsBox.Text = config.ServerArgs;
+
         var args = Environment.GetCommandLineArgs();
         var flagIndex = Array.IndexOf(args, "--server-path");
         if (flagIndex >= 0 && flagIndex + 1 < args.Length)
         {
             ServerPathBox.Text = args[flagIndex + 1];
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(config?.ServerPath) && File.Exists(config.ServerPath))
+        {
+            ServerPathBox.Text = config.ServerPath;
             return;
         }
 
@@ -103,6 +148,7 @@ public partial class LaunchWindow : Window
         }
 
         App.ServerProcess = server;
+        SaveConfig();
 
         var uploadWindow = new VideoUploadWindow();
         if (Avalonia.Application.Current?.ApplicationLifetime
