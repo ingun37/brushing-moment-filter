@@ -4,16 +4,20 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Interactivity;
 using Avalonia.Media.Imaging;
-using Avalonia.Platform.Storage;
 using Frameservice;
-using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 
 namespace DataGenUI;
 
+// Step three of the startup flow (LaunchWindow -> VideoUploadWindow ->
+// MainWindow): reviews the frames of the session VideoUploadWindow started.
+// The upload and Start handshake are already done; this window drives the
+// Next/Frames ping-pong and returns to VideoUploadWindow when the user wants
+// another video.
 public partial class MainWindow : Window
 {
     private const int BatchSize = 12;
@@ -23,151 +27,44 @@ public partial class MainWindow : Window
     private readonly List<byte[]> _batchPngs = [];
     private readonly List<double> _batchTimestamps = []; // parallel to _batchPngs
     private bool _eofReceived;
-    private string _positiveDir = "";
-    private string _negativeDir = "";
-    private string _manifestPath = "";
-    private SessionManifest? _manifest;
+    private readonly string _positiveDir;
+    private readonly string _negativeDir;
+    private readonly string _manifestPath;
+    private readonly SessionManifest _manifest;
     private int _frameIndex; // index of the first frame of the current batch
     private int _positiveCount;
 
-    public MainWindow()
+    public MainWindow(VideoSession session)
     {
         InitializeComponent();
+        _channel = session.Channel;
+        _call = session.Call;
+        _manifest = session.Manifest;
+        _manifestPath = session.ManifestPath;
+        _positiveDir = session.PositiveDir;
+        _negativeDir = session.NegativeDir;
+        _positiveCount = _manifest.Frames.Count(f => f.Positive);
         UpdateProgress();
+        Loaded += OnLoaded;
     }
 
-    // Aggregates every session manifest under DataGenUI_data/sessions (the
-    // current video's counts come from the in-memory manifest, which is ahead
-    // of disk mid-batch) and shows the overall collection progress.
+    // Fetches the first batch of the already-started session.
+    private async void OnLoaded(object? sender, RoutedEventArgs e)
+    {
+        Loaded -= OnLoaded;
+        StatusText.Text = _manifest.ResumeSeconds > 0
+            ? $"Waiting for frames… (resuming from {_manifest.ResumeSeconds:F1} s)"
+            : "Waiting for frames…";
+        await RequestBatchAsync();
+    }
+
+    // Shows the overall collection progress across every session manifest
+    // (the current video's counts come from the in-memory manifest, which is
+    // ahead of disk mid-batch).
     private void UpdateProgress()
     {
-        var positive = 0;
-        var negative = 0;
-        var videos = 0;
         var sessionsDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data", "sessions");
-        if (Directory.Exists(sessionsDir))
-        {
-            foreach (var file in Directory.EnumerateFiles(sessionsDir, "*.json"))
-            {
-                var manifest = file == _manifestPath && _manifest is not null
-                    ? _manifest
-                    : SessionManifest.LoadOrCreate(file, "");
-                if (manifest.Frames.Count == 0)
-                    continue;
-                videos++;
-                positive += manifest.Frames.Count(f => f.Positive);
-                negative += manifest.Frames.Count(f => !f.Positive);
-            }
-        }
-        ProgressText.Text = videos == 0
-            ? "No data collected yet."
-            : $"Collected {positive} positive / {negative} negative frame(s) from {videos} video(s).";
-    }
-
-    private async void OnOpenVideo(object? sender, RoutedEventArgs e)
-    {
-        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
-        {
-            Title = "Choose a video",
-            FileTypeFilter = [new FilePickerFileType("Video") { Patterns = ["*.mp4"] }],
-        });
-        if (files.Count == 0)
-            return;
-        var path = files[0].TryGetLocalPath();
-        if (path is null)
-        {
-            StatusText.Text = "Cannot access the selected file.";
-            return;
-        }
-
-        // Per-video pipeline parameters, sent to the server on the first chunk.
-        if (!double.TryParse(IntervalBox.Text, out var intervalSeconds) || intervalSeconds <= 0)
-        {
-            StatusText.Text = "Interval must be a positive number of seconds.";
-            return;
-        }
-        if (!double.TryParse(ToleranceBox.Text, out var tolerance) || tolerance < 0)
-        {
-            StatusText.Text = "Dedup tolerance must be a non-negative number.";
-            return;
-        }
-
-        await EndSessionAsync();
-        _frameIndex = 0;
-        _eofReceived = false;
-        _batchPngs.Clear();
-        _batchTimestamps.Clear();
-        FrameList.Items.Clear();
-
-        try
-        {
-            OpenButton.IsEnabled = false;
-            StatusText.Text = "Uploading…";
-            // A 12-frame PNG batch easily exceeds the 4 MB default limit.
-            _channel = GrpcChannel.ForAddress(ServerBox.Text ?? "", new GrpcChannelOptions
-            {
-                MaxReceiveMessageSize = null, // unlimited
-            });
-            _call = new FrameService.FrameServiceClient(_channel).Session();
-
-            await using (var file = File.OpenRead(path))
-            {
-                var buffer = new byte[1 << 16];
-                int read;
-                var firstChunk = true;
-                while ((read = await file.ReadAsync(buffer)) > 0)
-                {
-                    var chunk = new VideoChunk
-                    {
-                        Data = ByteString.CopyFrom(buffer, 0, read),
-                        Last = file.Position == file.Length,
-                    };
-                    if (firstChunk)
-                    {
-                        chunk.SampleIntervalSeconds = intervalSeconds;
-                        chunk.DedupTolerance = tolerance;
-                        firstChunk = false;
-                    }
-                    await _call.RequestStream.WriteAsync(new ClientMessage { Chunk = chunk });
-                }
-            }
-
-            // The server identifies the uploaded video by its stream MD5;
-            // all session state (manifest, saved frames) is keyed by it, so
-            // renamed or moved copies of a video share one session.
-            var videoMd5 = await ReadVideoInfoAsync();
-            var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
-            _positiveDir = Path.Combine(dataDir, "positive", videoMd5);
-            _negativeDir = Path.Combine(dataDir, "negative", videoMd5);
-            _manifestPath = Path.Combine(dataDir, "sessions", videoMd5 + ".json");
-            _manifest = SessionManifest.LoadOrCreate(_manifestPath, path);
-            _manifest.VideoPath = path; // keep the latest known location
-            _positiveCount = _manifest.Frames.Count(f => f.Positive);
-            var resuming = _manifest.ResumeSeconds > 0;
-
-            StatusText.Text = resuming
-                ? $"Waiting for frames… (resuming from {_manifest.ResumeSeconds:F1} s)"
-                : "Waiting for frames…";
-            await _call.RequestStream.WriteAsync(new ClientMessage
-            {
-                Start = new Start { StartSeconds = _manifest.ResumeSeconds },
-            });
-            await _call.RequestStream.WriteAsync(new ClientMessage
-            {
-                Next = new Next { Count = BatchSize },
-            });
-            await ReadResponseAsync();
-            await ShowBatchAsync();
-        }
-        catch (Exception ex)
-        {
-            StatusText.Text = $"Session failed: {ex.Message}";
-            await EndSessionAsync();
-        }
-        finally
-        {
-            OpenButton.IsEnabled = true;
-        }
+        ProgressText.Text = SessionManifest.DescribeProgress(sessionsDir, _manifestPath, _manifest);
     }
 
     private async void OnKeep(object? sender, RoutedEventArgs e)
@@ -183,6 +80,32 @@ public partial class MainWindow : Window
     {
         await SaveBatchAsync([]);
         await RequestNextBatchAsync();
+    }
+
+    // Stops any active session and returns to the video-choosing step.
+    private async void OnBack(object? sender, RoutedEventArgs e)
+    {
+        if (_call is not null)
+        {
+            try
+            {
+                await _call.RequestStream.WriteAsync(new ClientMessage { Stop = new Stop() });
+            }
+            catch (Exception)
+            {
+                // The session may already be gone; ending it below is enough.
+            }
+        }
+        await EndSessionAsync();
+
+        var upload = new VideoUploadWindow();
+        if (Avalonia.Application.Current?.ApplicationLifetime
+            is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow = upload;
+        }
+        upload.Show();
+        Close();
     }
 
     // Writes every frame of the current batch: selected ones to the positive
@@ -203,7 +126,7 @@ public partial class MainWindow : Window
             if (positive)
                 _positiveCount++;
 
-            _manifest!.Frames.Add(new FrameRecord
+            _manifest.Frames.Add(new FrameRecord
             {
                 File = Path.GetRelativePath(AppContext.BaseDirectory, name),
                 TimestampSeconds = timestamp,
@@ -213,54 +136,10 @@ public partial class MainWindow : Window
         if (_batchTimestamps.Count > 0)
         {
             // Nudge past the last frame so resuming does not re-serve it.
-            _manifest!.ResumeSeconds = _batchTimestamps[^1] + 0.001;
+            _manifest.ResumeSeconds = _batchTimestamps[^1] + 0.001;
             _manifest.Save(_manifestPath);
         }
         UpdateProgress();
-    }
-
-    // Ends any active session and deletes everything under DataGenUI_data:
-    // saved positive/negative frames and all session manifests.
-    private async void OnClear(object? sender, RoutedEventArgs e)
-    {
-        await EndSessionAsync();
-        var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
-        try
-        {
-            if (Directory.Exists(dataDir))
-                Directory.Delete(dataDir, recursive: true);
-        }
-        catch (IOException ex)
-        {
-            StatusText.Text = $"Clear failed: {ex.Message}";
-            return;
-        }
-        _manifest = null;
-        _manifestPath = "";
-        _positiveDir = "";
-        _negativeDir = "";
-        _frameIndex = 0;
-        _positiveCount = 0;
-        FrameList.Items.Clear();
-        StatusText.Text = "Cleared all saved frames and session state. Open a video to start.";
-        UpdateProgress();
-    }
-
-    private async void OnStop(object? sender, RoutedEventArgs e)
-    {
-        if (_call is not null)
-        {
-            try
-            {
-                await _call.RequestStream.WriteAsync(new ClientMessage { Stop = new Stop() });
-            }
-            catch (Exception)
-            {
-                // The session may already be gone; ending it below is enough.
-            }
-        }
-        await EndSessionAsync();
-        StatusText.Text = $"Stopped. {_positiveCount} positive frame(s) in {_positiveDir}";
     }
 
     private async Task RequestNextBatchAsync()
@@ -280,9 +159,15 @@ public partial class MainWindow : Window
             return;
         }
 
+        await RequestBatchAsync();
+    }
+
+    // Asks the server for the next batch and displays it.
+    private async Task RequestBatchAsync()
+    {
         try
         {
-            await _call.RequestStream.WriteAsync(new ClientMessage
+            await _call!.RequestStream.WriteAsync(new ClientMessage
             {
                 Next = new Next { Count = BatchSize },
             });
@@ -294,18 +179,6 @@ public partial class MainWindow : Window
             StatusText.Text = $"Session failed: {ex.Message}";
             await EndSessionAsync();
         }
-    }
-
-    // Reads the VideoInfo the server sends once the upload completes and
-    // returns the video's stream MD5.
-    private async Task<string> ReadVideoInfoAsync()
-    {
-        if (!await _call!.ResponseStream.MoveNext(default))
-            throw new RpcException(new Status(StatusCode.Unavailable, "stream ended"));
-        var message = _call.ResponseStream.Current;
-        if (message.MsgCase != ServerMessage.MsgOneofCase.Info)
-            throw new RpcException(new Status(StatusCode.Internal, "expected VideoInfo"));
-        return message.Info.VideoMd5;
     }
 
     // Reads one server message, appending its frames to the current batch or
@@ -355,7 +228,6 @@ public partial class MainWindow : Window
     {
         KeepButton.IsEnabled = enabled;
         SkipButton.IsEnabled = enabled;
-        StopButton.IsEnabled = enabled;
     }
 
     private async Task EndSessionAsync()

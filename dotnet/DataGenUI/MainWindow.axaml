@@ -8,33 +8,22 @@
         Width="800" Height="600">
     <DockPanel Margin="12">
 
-        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="Server:" VerticalAlignment="Center"/>
-            <TextBox x:Name="ServerBox" Text="http://localhost:15071" Width="220"/>
-            <TextBlock Text="Interval (s):" VerticalAlignment="Center"/>
-            <TextBox x:Name="IntervalBox" Text="1.0" Width="60"/>
-            <TextBlock Text="Dedup tolerance:" VerticalAlignment="Center"/>
-            <TextBox x:Name="ToleranceBox" Text="5" Width="60"/>
-            <Button x:Name="OpenButton" Content="Open Video…" Click="OnOpenVideo"/>
-            <Button x:Name="ClearButton" Content="Clear" Click="OnClear"/>
-        </StackPanel>
-
         <StackPanel DockPanel.Dock="Bottom" Spacing="8">
             <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
                 <Button x:Name="KeepButton" Content="Keep Selected" IsEnabled="False"
                         MinWidth="100" Click="OnKeep"/>
                 <Button x:Name="SkipButton" Content="Skip All" IsEnabled="False"
                         MinWidth="100" Click="OnSkip"/>
-                <Button x:Name="StopButton" Content="Stop" IsEnabled="False"
-                        MinWidth="100" Click="OnStop"/>
+                <Button x:Name="BackButton" Content="Choose Another Video…"
+                        MinWidth="100" Click="OnBack"/>
             </StackPanel>
-            <TextBlock x:Name="StatusText" Text="Open a video to start a session."
+            <TextBlock x:Name="StatusText" Text="Waiting for frames…"
                        HorizontalAlignment="Center"/>
             <TextBlock x:Name="ProgressText" Text="" HorizontalAlignment="Center"
                        Foreground="Gray"/>
         </StackPanel>
 
-        <Border BorderBrush="Gray" BorderThickness="1" Margin="0,12">
+        <Border BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,12">
             <ListBox x:Name="FrameList" SelectionMode="Multiple,Toggle"
                      ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                 <ListBox.ItemsPanel>

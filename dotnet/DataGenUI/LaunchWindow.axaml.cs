@@ -104,13 +104,13 @@ public partial class LaunchWindow : Window
 
         App.ServerProcess = server;
 
-        var mainWindow = new MainWindow();
+        var uploadWindow = new VideoUploadWindow();
         if (Avalonia.Application.Current?.ApplicationLifetime
             is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            desktop.MainWindow = mainWindow;
+            desktop.MainWindow = uploadWindow;
         }
-        mainWindow.Show();
+        uploadWindow.Show();
         Close();
     }
 }

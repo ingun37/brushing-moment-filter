@@ -45,6 +45,39 @@ public class SessionManifest
         return new SessionManifest { VideoPath = videoPath };
     }
 
+    // Aggregates every manifest under `sessionsDir` into a one-line overall
+    // progress description. `current` (at `currentPath`) substitutes for its
+    // on-disk copy, which is behind the in-memory state mid-batch.
+    public static string DescribeProgress(string sessionsDir, string currentPath = "",
+                                          SessionManifest? current = null)
+    {
+        var positive = 0;
+        var negative = 0;
+        var videos = 0;
+        if (Directory.Exists(sessionsDir))
+        {
+            foreach (var file in Directory.EnumerateFiles(sessionsDir, "*.json"))
+            {
+                var manifest = file == currentPath && current is not null
+                    ? current
+                    : LoadOrCreate(file, "");
+                if (manifest.Frames.Count == 0)
+                    continue;
+                videos++;
+                foreach (var frame in manifest.Frames)
+                {
+                    if (frame.Positive)
+                        positive++;
+                    else
+                        negative++;
+                }
+            }
+        }
+        return videos == 0
+            ? "No data collected yet."
+            : $"Collected {positive} positive / {negative} negative frame(s) from {videos} video(s).";
+    }
+
     public void Save(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);

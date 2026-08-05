@@ -12,8 +12,14 @@ video and fetches the next batch, Skip All just fetches the next batch, Stop end
   itself (see below), so a running server is not a prerequisite — but the executable must be
   built (`cmake --build cpp/build --target frame_server`). The session idle timeout is fixed
   at 300 s server-side and ticks between user clicks.
-- Startup flow (`LaunchWindow.axaml.cs`): the app opens `LaunchWindow` first, which locates
-  `frame_server`, spawns it as a subprocess, then swaps to `MainWindow`. Path resolution
+- Window flow: `LaunchWindow` (start `frame_server`) → `VideoUploadWindow` (pick a video +
+  pipeline parameters, upload, VideoInfo/Start handshake, also hosts Clear) → `MainWindow`
+  (frame review only; its "Choose Another Video…" button stops the session and returns to
+  `VideoUploadWindow`). Each step closes itself and opens the next, reassigning
+  `desktop.MainWindow`. `MainWindow` takes the live `VideoSession` (channel, call, manifest,
+  save dirs) via its constructor and owns disposal from then on.
+- Startup (`LaunchWindow.axaml.cs`): `LaunchWindow` locates
+  `frame_server` and spawns it as a subprocess. Path resolution
   order: (1) `--server-path <path>` CLI argument (e.g. `dotnet run -- --server-path
   ../../cpp/build/frame_server`), (2) a `frame_server` file next to the app executable
   (`AppContext.BaseDirectory`), (3) a file picker. The resolved path and the server arguments
@@ -21,11 +27,13 @@ video and fetches the next batch, Skip All just fetches the next batch, Stop end
   1 s to catch an immediate exit (bad flags, port in use — shown in the status line, retry
   allowed), then opens the main view. The `Process` handle lives in `App.ServerProcess`;
   `App.axaml.cs` kills it on `desktop.Exit`.
-- Pipeline parameters are per-video, not server flags: the main window has editable
+- Pipeline parameters are per-video, not server flags: `VideoUploadWindow` has editable
   Interval (s) / Dedup tolerance fields (defaults 1.0 / 5), validated on Open Video… and
   sent on the first `VideoChunk` of the upload.
 - No MVVM: the template is plain code-behind (`MainWindow.axaml.cs` holds the gRPC session
   state). Fine at this size; introduce a view model only if the UI grows.
+  `MainWindow`'s session-taking constructor means Avalonia emits AVLN3001 (no parameterless
+  ctor for the runtime XAML loader) — harmless, it is always constructed directly.
 - Session handshake: upload → server replies `VideoInfo` with the video's stream MD5 →
   client sends `Start` with the resume position. All per-video state (manifest under
   `DataGenUI_data/sessions/<md5>.json`, saved frames under `positive/<md5>` and
