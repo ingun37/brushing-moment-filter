@@ -23,6 +23,7 @@ public class VideoSession
     public required string ManifestPath { get; init; }
     public required string PositiveDir { get; init; }
     public required string NegativeDir { get; init; }
+    public required double DurationSeconds { get; init; }
 }
 
 // Step two of the startup flow (LaunchWindow -> VideoUploadWindow ->
@@ -110,7 +111,8 @@ public partial class VideoUploadWindow : Window
             // The server identifies the uploaded video by its stream MD5;
             // all session state (manifest, saved frames) is keyed by it, so
             // renamed or moved copies of a video share one session.
-            var videoMd5 = await ReadVideoInfoAsync(call);
+            var info = await ReadVideoInfoAsync(call);
+            var videoMd5 = info.VideoMd5;
             var dataDir = Path.Combine(AppContext.BaseDirectory, "DataGenUI_data");
             var manifestPath = Path.Combine(dataDir, "sessions", videoMd5 + ".json");
             var manifest = SessionManifest.LoadOrCreate(manifestPath, path);
@@ -129,6 +131,7 @@ public partial class VideoUploadWindow : Window
                 ManifestPath = manifestPath,
                 PositiveDir = Path.Combine(dataDir, "positive", videoMd5),
                 NegativeDir = Path.Combine(dataDir, "negative", videoMd5),
+                DurationSeconds = info.DurationSeconds,
             });
             if (Avalonia.Application.Current?.ApplicationLifetime
                 is IClassicDesktopStyleApplicationLifetime desktop)
@@ -148,9 +151,9 @@ public partial class VideoUploadWindow : Window
         }
     }
 
-    // Reads the VideoInfo the server sends once the upload completes and
-    // returns the video's stream MD5.
-    private static async Task<string> ReadVideoInfoAsync(
+    // Reads the VideoInfo (stream MD5 + duration) the server sends once the
+    // upload completes.
+    private static async Task<VideoInfo> ReadVideoInfoAsync(
         AsyncDuplexStreamingCall<ClientMessage, ServerMessage> call)
     {
         if (!await call.ResponseStream.MoveNext(default))
@@ -158,7 +161,7 @@ public partial class VideoUploadWindow : Window
         var message = call.ResponseStream.Current;
         if (message.MsgCase != ServerMessage.MsgOneofCase.Info)
             throw new RpcException(new Status(StatusCode.Internal, "expected VideoInfo"));
-        return message.Info.VideoMd5;
+        return message.Info;
     }
 
     // Deletes everything under DataGenUI_data: saved positive/negative frames

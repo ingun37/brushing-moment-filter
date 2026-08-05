@@ -111,6 +111,22 @@ TEST(VideoStreamMd5Test, FailsForMissingFile) {
     EXPECT_NE(result.error().find("does_not_exist"), std::string::npos);
 }
 
+TEST(VideoDurationSecondsTest, ReportsKnownDurations) {
+    // gen-test-resources.sh: ABC.mp4 is 3 x 1 s stills, 12.mp4 is 12 x 1 s.
+    const auto abc = videoDurationSeconds(kResourceDir + "/ABC.mp4");
+    ASSERT_TRUE(abc) << abc.error();
+    EXPECT_NEAR(*abc, 3.0, 0.2);
+    const auto twelve = videoDurationSeconds(kResourceDir + "/12.mp4");
+    ASSERT_TRUE(twelve) << twelve.error();
+    EXPECT_NEAR(*twelve, 12.0, 0.2);
+}
+
+TEST(VideoDurationSecondsTest, FailsForMissingFile) {
+    const auto result = videoDurationSeconds(kResourceDir + "/does_not_exist.mp4");
+    ASSERT_FALSE(result.has_value());
+    EXPECT_NE(result.error().find("does_not_exist"), std::string::npos);
+}
+
 TEST(ExtractFramesToQueueTest, ProducerPausesOnFullQueueAndDeliversAllFrames) {
     // Reference: the same sampling done synchronously yields 4 frames
     // (A, A, B, C at t = 0, 0.9, 1.8, 2.7), so a capacity-2 queue forces

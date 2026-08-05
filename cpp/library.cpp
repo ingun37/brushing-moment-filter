@@ -196,6 +196,22 @@ std::expected<std::string, std::string> videoStreamMd5(const std::string& path)
     return hex;
 }
 
+std::expected<double, std::string> videoDurationSeconds(const std::string& path)
+{
+    AVFormatContext* fmtRaw = nullptr;
+    int err = avformat_open_input(&fmtRaw, path.c_str(), nullptr, nullptr);
+    if (err < 0)
+        return fail("avformat_open_input failed for " + path, err);
+    std::unique_ptr<AVFormatContext, decltype([](AVFormatContext* p) { avformat_close_input(&p); })> fmt(fmtRaw);
+
+    if ((err = avformat_find_stream_info(fmt.get(), nullptr)) < 0)
+        return fail("avformat_find_stream_info failed", err);
+
+    if (fmt->duration == AV_NOPTS_VALUE)
+        return fail("container reports no duration for " + path);
+    return static_cast<double>(fmt->duration) / AV_TIME_BASE;
+}
+
 std::expected<std::vector<cv::Mat>, std::string>
 extractFrames(const std::string& path, double intervalSeconds, double startSeconds)
 {

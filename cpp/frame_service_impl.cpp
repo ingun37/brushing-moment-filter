@@ -183,9 +183,16 @@ grpc::Status FrameServiceImpl::Session(grpc::ServerContext* context, Stream* str
         std::cerr << md5.error() << "\n";
         return {grpc::StatusCode::INVALID_ARGUMENT, "hashing failed: " + md5.error()};
     }
+    const auto duration = videoDurationSeconds(video->path.string());
+    if (!duration) {
+        std::cerr << duration.error() << "\n";
+        return {grpc::StatusCode::INVALID_ARGUMENT,
+                "duration probing failed: " + duration.error()};
+    }
     {
         frameservice::ServerMessage message;
         message.mutable_info()->set_video_md5(*md5);
+        message.mutable_info()->set_duration_seconds(*duration);
         if (!stream->Write(message))
             return grpc::Status::OK; // client went away
     }

@@ -41,6 +41,11 @@ std::vector<cv::Mat> removeConsecutiveDuplicates(R&& frames, double tolerance)
 // is performed. On I/O failure, returns an error message.
 std::expected<std::string, std::string> videoStreamMd5(const std::string& path);
 
+// Returns the container-reported duration of the video at `path` in seconds.
+// On I/O failure or when the container does not report a duration, returns
+// an error message.
+std::expected<double, std::string> videoDurationSeconds(const std::string& path);
+
 // Decodes the video at `path` and returns one BGR frame for each sampling
 // point t = start, start + interval, start + 2*interval, ... within the
 // video's duration. On I/O or decoding failure, returns an error message.

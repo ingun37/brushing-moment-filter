@@ -61,6 +61,8 @@ message VideoInfo {
   // Container metadata is ignored, so remuxed copies hash equal; use this
   // (not the file name) to identify a video across sessions.
   string video_md5 = 1;
+  // Container-reported duration of the video.
+  double duration_seconds = 2;
 }
 
 message Frames {

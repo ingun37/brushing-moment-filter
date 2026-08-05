@@ -33,6 +33,7 @@ public partial class MainWindow : Window
     private readonly SessionManifest _manifest;
     private int _frameIndex; // index of the first frame of the current batch
     private int _positiveCount;
+    private readonly double _durationSeconds;
 
     public MainWindow(VideoSession session)
     {
@@ -44,8 +45,19 @@ public partial class MainWindow : Window
         _positiveDir = session.PositiveDir;
         _negativeDir = session.NegativeDir;
         _positiveCount = _manifest.Frames.Count(f => f.Positive);
+        _durationSeconds = Math.Max(session.DurationSeconds, 0.001);
+        VideoProgress.Maximum = _durationSeconds;
+        SetVideoPosition(_manifest.ResumeSeconds);
         UpdateProgress();
         Loaded += OnLoaded;
+    }
+
+    // Reflects how far into the video the review has progressed.
+    private void SetVideoPosition(double seconds)
+    {
+        var position = Math.Min(seconds, _durationSeconds);
+        VideoProgress.Value = position;
+        VideoProgressLabel.Text = $"{position:F1} / {_durationSeconds:F1} s";
     }
 
     // Fetches the first batch of the already-started session.
@@ -155,6 +167,7 @@ public partial class MainWindow : Window
         if (_eofReceived)
         {
             await EndSessionAsync();
+            SetVideoPosition(_durationSeconds);
             StatusText.Text = $"End of video. {_positiveCount} positive frame(s) in {_positiveDir}";
             return;
         }
@@ -204,9 +217,11 @@ public partial class MainWindow : Window
         if (_batchPngs.Count == 0) // eof with nothing left to review
         {
             await EndSessionAsync();
+            SetVideoPosition(_durationSeconds);
             StatusText.Text = $"End of video. {_positiveCount} positive frame(s) in {_positiveDir}";
             return;
         }
+        SetVideoPosition(_batchTimestamps[^1]);
 
         FrameList.Items.Clear();
         for (var i = 0; i < _batchPngs.Count; i++)

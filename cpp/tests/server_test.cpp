@@ -79,6 +79,9 @@ void upload(Stream& stream, const std::string& path,
     const auto expected = videoStreamMd5(path);
     ASSERT_TRUE(expected) << expected.error();
     EXPECT_EQ(info.info().video_md5(), *expected);
+    const auto duration = videoDurationSeconds(path);
+    ASSERT_TRUE(duration) << duration.error();
+    EXPECT_DOUBLE_EQ(info.info().duration_seconds(), *duration);
 
     frameservice::ClientMessage start;
     start.mutable_start()->set_start_seconds(startSeconds);
