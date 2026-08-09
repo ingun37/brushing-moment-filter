@@ -71,6 +71,7 @@ target_link_libraries(ffmpeg_playground_tests PRIVATE brushing_moment_filter GTe
 target_include_directories(ffmpeg_playground_tests PRIVATE ${CMAKE_SOURCE_DIR})
 target_compile_definitions(ffmpeg_playground_tests PRIVATE
         TEST_RESOURCE_DIR="${CMAKE_SOURCE_DIR}/tests/resources")
+add_dependencies(ffmpeg_playground_tests frame_server)
 
 add_executable(frame_server_tests tests/server_test.cpp)
 target_link_libraries(frame_server_tests PRIVATE frame_service GTest::gtest_main)
