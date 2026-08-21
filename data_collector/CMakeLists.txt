@@ -2,13 +2,14 @@ cmake_minimum_required(VERSION 3.16)
 
 project(data_collector VERSION 0.1 LANGUAGES CXX)
 
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
         libavcodec libavfilter libavformat libavutil libswscale libswresample)
 
-find_package(Qt6 REQUIRED COMPONENTS Quick)
+find_package(Qt6 REQUIRED COMPONENTS Quick Concurrent)
 
 qt_standard_project_setup(REQUIRES 6.10)
 
@@ -19,12 +20,19 @@ endif()
 
 qt_add_executable(appdata_collector
     main.cpp
+    md5.h md5.cpp
+    clips.h clips.cpp
+    clipstore.h
+    clipimageprovider.h clipimageprovider.cpp
+    session.h session.cpp
 )
 
 qt_add_qml_module(appdata_collector
     URI data_collector
     QML_FILES
         Main.qml
+        StartScene.qml
+        CollectScene.qml
 )
 
 # Qt for iOS sets MACOSX_BUNDLE_GUI_IDENTIFIER automatically since Qt 6.1.
@@ -39,7 +47,7 @@ set_target_properties(appdata_collector PROPERTIES
 )
 
 target_link_libraries(appdata_collector
-    PRIVATE Qt6::Quick
+    PRIVATE Qt6::Quick Qt6::Concurrent PkgConfig::FFMPEG
 )
 
 install(TARGETS appdata_collector
